@@ -4,7 +4,10 @@ kind: Component
 metadata:
   id: integration/im-dingtalk         # ⚠️ Fork 件必须与标准件完全一致（§3.4.1）
   name: 钉钉通道适配器
-  version: 1.0.0                      # 精确版本，不接受 ^ / ~ / latest
+  version: 1.0.1                      # 精确版本，不接受 ^ / ~ / latest
+                                       # 1.0.1：真机验证钉钉真实凭据时发现
+                                       # "应用未开通所需权限"这类错误被误判成
+                                       # 可重试，改判不可重试（真实响应验证过）
   description: channel:im 族第一个成员——只监听 infra-notification 的 IM 派发事件、调钉钉开放平台工作通知 API、发回调结果事件，严禁包含业务逻辑（设计书 §6.9）
   license: Apache-2.0
   vendor: brickKit
@@ -64,7 +67,7 @@ configSchema:
 
 deployment:
   type: container
-  image: brickenterprise/integration-im-dingtalk:1.0.0
+  image: brickenterprise/integration-im-dingtalk:1.0.1
   port: 8207                          # 端口册 registry/ports.tsv
   extraPorts:
     - { name: grpc, port: 9207 }      # → INTEGRATION_IM_DINGTALK_GRPC_ENDPOINT（值仍以 http:// 开头）
