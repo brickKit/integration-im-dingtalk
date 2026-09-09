@@ -18,6 +18,26 @@ func TestClassifyError_用户不存在不可重试且清缓存(t *testing.T) {
 	}
 }
 
+// TestClassifyError_应用未开通权限不可重试 用的是 2026-09-09 真机验证时
+// 从真实钉钉服务器拿到的原始响应（个人测试团队 + 未开通
+// qyapi_get_member_by_mobile 权限，调 topapi/v2/user/getbymobile 触发）——
+// 不是编出来的样例。这条错误此前落进"区分不了"的默认可重试桶，会白白
+// 重试 3 次才放弃；权限问题需要人去开发者后台点一次"申请权限"，重试
+// 不会自愈，已改判不可重试。
+func TestClassifyError_应用未开通权限不可重试(t *testing.T) {
+	realMsg := `ding talk error[subcode=60011,submsg=应用尚未开通所需的权限：[qyapi_get_member_by_mobile]，点击链接申请并开通即可：https://open-dev.dingtalk.com/appscope/apply?content=dingaq7iiv6ps2sgn3rt%23qyapi_get_member_by_mobile, {requiredScopes=[qyapi_get_member_by_mobile]}]`
+	retryable, code, evict := ClassifyError(&APIError{Code: 88, Msg: realMsg})
+	if retryable {
+		t.Fatal("应用未开通权限期望不可重试——这是真机验证过的真实响应，不是编的样例")
+	}
+	if evict {
+		t.Fatal("权限问题不该清用户缓存——跟这个手机号本身无关")
+	}
+	if code != "DINGTALK_88" {
+		t.Fatalf("期望 DINGTALK_88，实际 %q", code)
+	}
+}
+
 func TestClassifyError_限流可重试(t *testing.T) {
 	retryable, _, evict := ClassifyError(&APIError{Code: 90018, Msg: "系统繁忙，请稍后重试"})
 	if !retryable {

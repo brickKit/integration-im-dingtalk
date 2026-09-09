@@ -10,12 +10,13 @@ import (
 // 重试"只有本适配器知道，infra-notification 只管"要不要真的重试、隔多久"
 // （两边分工不能混，都判会打架，都不判会给离职员工重试 5 次）。
 //
-// ⚠️ 判据按 errmsg 文本关键词匹配，而不是 errcode 数字——这是"只做到
-// 能编译通过的程度"这条既定决策的直接后果：没有真实钉钉沙盒可验证
-// 具体错误码是不是真的对应这些场景（本文件顶部 dingtalk.md 设计计划
-// §9 待决问题 1 明确要求"真调钉钉沙盒验证"，本阶段跳过了）。等有真实
-// 测试企业时要用真实响应验证这里的关键词列表，届时大概率要改成更精确
-// 的 errcode 判断。
+// ⚠️ 判据按 errmsg 文本关键词匹配，而不是 errcode 数字——早期没有真实
+// 钉钉沙盒时留的判据。2026-09-09 用真实测试企业验证过一轮："应用未开通
+// 所需权限"这一类（errcode=88，真实响应：`{"errcode":88,"sub_code":
+// "60011","sub_msg":"应用尚未开通所需的权限：[qyapi_get_member_by_mobile]…"}`）
+// 之前落进"区分不了"的默认可重试桶，会白白重试 3 次再放弃——这类错误
+// 需要人去开发者后台点一次"申请权限"，重试不会让它自己好，已改判不可
+// 重试。其余分支仍未用真实响应验证，见各自注释。
 //
 // evictUserCache=true 时调用方（consumer 包）要删掉 dingtalk_user_map
 // 里对应手机号的缓存行（设计计划 §2 的过期策略）。
@@ -36,6 +37,11 @@ func ClassifyError(err error) (retryable bool, errorCode string, evictUserCache 
 		// 配置错了，重试只会刷屏，要让运维看见（除了 access_token 过期
 		// 这种"我先自己刷一次再报"的情况——那个由 client 调用方在
 		// SendWorkNotificationWithAutoRefresh 里拦截，不会走到这里）。
+		return false, apiErrorCode(apiErr), false
+	case containsAny(msg, "未开通所需的权限", "尚未开通", "无权限", "no privilege", "forbidden"):
+		// ✅ 真机验证过（errcode=88，见本函数顶部注释）：应用没有申请到
+		// 需要的 scope，需要人去开发者后台点一次"申请并开通"——同配置
+		// 错误一样，重试不会自愈，值得让运维立刻看见而不是刷三次屏。
 		return false, apiErrorCode(apiErr), false
 	case containsAny(msg, "系统繁忙", "频率", "限流", "超过调用限制", "concurrency"):
 		return true, apiErrorCode(apiErr), false
