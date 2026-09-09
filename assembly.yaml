@@ -1,0 +1,40 @@
+id: integration/im-dingtalk           # 必须与 component.yaml 一致，be-ops 校验
+version: 1.0.0
+
+asset:
+  source_type: open_standard
+  assembly_role: channel:im           # ⚠️ channel 族成员，不是 slot——可与企业微信/飞书/Slack/Teams
+                                       # 等其余 channel:im 成员同时装配、并存，互不互斥（设计书 §3.3、§5.11）
+  contract_lock: strict
+  customization_guide: |
+    本组件是 channel:im 族第一个成员，族级契约（proto 包名
+    integration.im.v1、消费的 dispatch.im.v1、发布的
+    integration.im.result.v1）不是本组件的自由——建族里第二个成员
+    （企业微信/飞书/Slack/Teams）时必须原样复用这份契约，只换适配器
+    内部实现（设计计划 §9 第 4 条）。
+    metadata.id 与 version 一个字都不能改——改了所有依赖方的
+    INTEGRATION_IM_DINGTALK_ENDPOINT 会整个消失（虽然本阶段没有任何
+    组件对本组件建依赖边，见设计计划 §5：给 channel 族成员建依赖边
+    等于要求这个通道必须装，族的可装可不装当场失效）。
+
+domain: integration
+tier: backend
+
+edge_routes:
+  - { path: /integration/im/**, auth: required }   # 族级前缀（设计计划 §3），不是 /integration/im-dingtalk/**
+
+menus:
+  - { key: integration.im, title: 钉钉投递排障, permission: integration.im.admin }
+
+data:
+  schema: integration_im_dingtalk       # registry/schemas.tsv
+  role:   integration_im_dingtalk_rw    # 只用于 SET LOCAL ROLE，从不登录，因此不进 brickkit.yaml
+
+# ⚠️ 本组件没有面向用户的数据，只有运维排障用的投递记录——省略
+# data_scopes 会被 be-ops 当场拦下（导读第 22 条），"不需要"必须显式写。
+data_scopes: none
+
+permissions:
+  - { key: integration.im.admin, title: 钉钉投递排障, type: page }
+
+shell: go-infra                       # 合并部署时进外壳三（§13.2、设计计划身份证）

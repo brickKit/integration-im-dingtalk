@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package integration.im.v1;
+
+option go_package = "github.com/brickKit/integration-im-dingtalk/gen/integration/im/v1;imv1";
+
+import "google/protobuf/timestamp.proto";
+
+// ImChannelService 是 channel:im 族的族级 gRPC 契约（设计计划 §3）。
+//
+// ⚠️ 包名是族级 integration.im，不是 integration.im.dingtalk——channel:im
+// 族的五个成员（钉钉/企业微信/飞书/Slack/Teams）实现同一份 proto
+// （设计书 §5.11：族内契约面必须一致）。装了哪几个是装配期的事，
+// 调用方不该因为换了通道就改 import 路径。
+//
+// ⚠️ 没有任何"发消息"的 rpc，这是刻意的：给了它，infra-notification 或
+// 业务组件就可能同步调本组件——而对 channel:* 族成员建依赖边，等于
+// 要求这个通道必须装，族的可装可不装当场失效（同 slot:iam 那条硬约束
+// 的道理，§5.11）。发消息只能通过事件进来。
+service ImChannelService {
+  // BatchGetDeliveryStatus 是防 N+1 的唯一合法批量读方式（§3.8）：
+  // 按 record_id[] 查投递结果，排障用。
+  rpc BatchGetDeliveryStatus(BatchGetDeliveryStatusRequest) returns (BatchGetDeliveryStatusResponse);
+
+  // GetChannelHealth：外部平台当前可不可达、token 还有多久过期。给运维
+  // 看，不给业务判断用（设计计划 §3）。
+  rpc GetChannelHealth(GetChannelHealthRequest) returns (ChannelHealth);
+}
+
+enum DeliveryPhase {
+  DELIVERY_PHASE_UNSPECIFIED = 0;
+  DELIVERY_PHASE_ACCEPTED = 1;   // 钉钉受理了任务，不代表送达
+  DELIVERY_PHASE_CONFIRMED = 2;  // 已查到每个收件人的真实结果
+}
+
+// DeliveryStatus 是一次投递尝试的当前状态，读接口直接返回它本身
+// （不额外包一层 XxxResponse——本项目契约的一贯风格）。
+message DeliveryStatus {
+  string record_id = 1;
+  string adapter = 2;              // 如 "dingtalk"——族级 subject 靠这个字段区分是谁发的
+  DeliveryPhase phase = 3;
+  bool success = 4;                // 只有 phase=CONFIRMED 时有意义
+  string error_code = 5;
+  bool retryable = 6;              // ⚠️ 由适配器判定，通知中心据此决定要不要重试（设计计划 §4.1）
+  string external_task_id = 7;     // 钉钉返回的 task_id
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message BatchGetDeliveryStatusRequest {
+  repeated string record_ids = 1;
+}
+
+message BatchGetDeliveryStatusResponse {
+  // 顺序与 record_ids 一致；查不到的 id 对应位置省略（同 batchGet 惯例）。
+  repeated DeliveryStatus statuses = 1;
+}
+
+message GetChannelHealthRequest {}
+
+message ChannelHealth {
+  bool reachable = 1;
+  google.protobuf.Timestamp token_expires_at = 2;
+  string last_error = 3;
+}

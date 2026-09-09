@@ -1,0 +1,84 @@
+apiVersion: brickkit/v1
+kind: Component
+
+metadata:
+  id: integration/im-dingtalk         # ⚠️ Fork 件必须与标准件完全一致（§3.4.1）
+  name: 钉钉通道适配器
+  version: 1.0.0                      # 精确版本，不接受 ^ / ~ / latest
+  description: channel:im 族第一个成员——只监听 infra-notification 的 IM 派发事件、调钉钉开放平台工作通知 API、发回调结果事件，严禁包含业务逻辑（设计书 §6.9）
+  license: Apache-2.0
+  vendor: brickKit
+
+tags: [integration, im, dingtalk]
+
+artifacts:
+  - type: api-contract
+    format: protobuf
+    files:
+      - contracts/integration/im/v1/im.proto
+      - contracts/events/im-dingtalk.events.json
+  - type: api-contract
+    format: openapi
+    files: [contracts/im-dingtalk.openapi.yaml]
+  - type: metadata                    # ← assembly.yaml 靠这一条随组件分发（§3.5）
+    files: [assembly.yaml]
+
+# ⚠️ 零强依赖零弱依赖——本组件完全活在事件图上（设计计划 §5、§6）：
+# 不同步调 infra-notification（双向都是事件），也不同步调
+# infra-iam-casdoor（手机号由 infra-notification 放进派发事件 payload
+# 给我，我多一条到 iam 的边就是给 slot:iam 加依赖方，§5 硬约束）。
+dependencies:
+  components: []
+  resources:
+    - { kind: database, engine: postgresql }
+    - { kind: mq,       engine: nats }         # 消费 dispatch.im.v1，发 integration.im.result.v1
+
+configSchema:
+  type: object
+  properties:
+    pgSchema:                         # ⚠️ 不能叫 databaseSchema，DATABASE_ 是保留前缀
+      type: string
+      default: integration_im_dingtalk
+    otelBaseUrl:                      # ⚠️ 不能叫 otelEndpoint，*_ENDPOINT 是保留后缀
+      type: string
+      default: ""
+    iamJwksUrl:                       # JWT 本地验签的公钥来源，供 /admin/** 排障接口用
+      type: string
+      default: ""
+    authzBundleUrl:                   # 权限判定的 bundle 轮询地址
+      type: string
+      default: ""
+    dingtalkBaseUrl:                  # 钉钉开放平台的基地址，默认官方地址；测试沙盒可覆盖
+      type: string
+      default: "https://oapi.dingtalk.com"
+    dingtalkAppKey:                   # 钉钉企业内部应用的 AppKey
+      type: string
+    dingtalkAppSecret:                # ⚠️ 同数据库密码一个级别的敏感值，走 ${VAR} 引用
+      type: string
+    dingtalkAgentId:                  # 工作通知接口必填的微应用 id
+      type: string
+  # ⚠️ 三项钉钉凭据必填、无默认值——本组件的存在意义就是真的调钉钉，
+  # 缺了这三项装上也发不出任何消息（同 erp-sales 的 defaultWarehouseId
+  # 既有判据：能在生成阶段拦住的缺配置就不留到运行时 panic）。
+  required: [dingtalkAppKey, dingtalkAppSecret, dingtalkAgentId]
+
+deployment:
+  type: container
+  image: brickenterprise/integration-im-dingtalk:1.0.0
+  port: 8207                          # 端口册 registry/ports.tsv
+  extraPorts:
+    - { name: grpc, port: 9207 }      # → INTEGRATION_IM_DINGTALK_GRPC_ENDPOINT（值仍以 http:// 开头）
+  labels:                             # 平台只搬运，不解释键值。值必须是字符串
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8207"
+    prometheus.io/path: "/metrics"
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+
+migration:
+  command: ["./migrate", "up"]
+
+healthCheck:
+  type: http
+  path: /healthz                      # ⚠️ 只查本进程存活，严禁查库、查钉钉可达性（§12.3.6）
+  # startPeriodSeconds 不写：默认就是 60，Go 组件够用（§12.3.5）

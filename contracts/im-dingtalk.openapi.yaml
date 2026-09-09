@@ -1,0 +1,64 @@
+openapi: 3.0.3
+info:
+  title: integration-im-dingtalk · 钉钉通道适配器
+  version: 1.0.0
+  description: |
+    对外 REST 面，路径挂在 `/integration/im/**`——这是 channel:im 族级
+    前缀（设计计划 §3），不是 `/integration/im-dingtalk/**`。
+
+    ⚠️ 没有 webhook 回调入口：钉钉的工作通知是单向推送，不需要回调地址
+    （设计计划 §3）。这里只有两个排障用的管理端点。
+
+paths:
+  /integration/im/admin/deliveries:
+    get:
+      summary: 排障——某条通知发出去没有、钉钉返回了什么
+      operationId: adminListDeliveries
+      parameters:
+        - { name: record_id, in: query, schema: { type: string } }
+        - { name: phase,     in: query, schema: { type: string, enum: [ACCEPTED, CONFIRMED] } }
+        - { name: cursor,    in: query, schema: { type: string } }
+        - { name: page_size, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeliveryAttemptListResponse" }
+
+  /integration/im/admin/token/refresh:
+    post:
+      summary: 应急手动强制刷新钉钉 access_token
+      operationId: adminRefreshToken
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenStatus" }
+
+components:
+  schemas:
+    DeliveryAttempt:
+      type: object
+      properties:
+        record_id: { type: string }
+        phase: { type: string, enum: [ACCEPTED, CONFIRMED] }
+        success: { type: boolean }
+        error_code: { type: string }
+        retryable: { type: boolean }
+        external_task_id: { type: string }
+        attempted_at: { type: string, format: date-time }
+
+    DeliveryAttemptListResponse:
+      type: object
+      properties:
+        attempts:
+          type: array
+          items: { $ref: "#/components/schemas/DeliveryAttempt" }
+        next_cursor: { type: string }
+
+    TokenStatus:
+      type: object
+      properties:
+        expires_at: { type: string, format: date-time }

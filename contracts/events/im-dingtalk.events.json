@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "integration-im-dingtalk 事件清单",
+  "note": "Schema 演进铁律：只增不删不改（决策 19）。消费者宽容反序列化。⚠️ 两条 subject 都是 channel:im 族级的（不带 dingtalk 字样），钉钉只是靠 payload 里的 adapter/target_adapters 字段区分——族内其余成员建成时必须原样复用这份契约（设计计划 §9 第 4 条）。",
+  "envelope": {
+    "description": "所有事件共用的信封。三个 Header 字段由 be-sdk 自动填/校验（§3.10）",
+    "required": ["subject", "aggregate_id", "version", "trace_id", "causation_id", "hop_count", "occurred_at"],
+    "properties": {
+      "subject":      { "type": "string", "pattern": "^[a-z]+\\.[a-z-]+\\.[a-z-]+\\.v[0-9]+$" },
+      "aggregate_id": { "type": "string" },
+      "version":      { "type": "integer", "description": "消费者只在严格大于本地当前值时更新（决策 43）" },
+      "trace_id":     { "type": "string" },
+      "causation_id": { "type": "string" },
+      "hop_count":    { "type": "integer", "maximum": 5, "description": "> 5 直接丢弃进 DLQ（决策 42）" },
+      "occurred_at":  { "type": "string", "format": "date-time" }
+    }
+  },
+  "events": [
+    {
+      "subject": "integration.im.result.v1",
+      "grade": "core",
+      "note": "⭐ 每个投递阶段各发一次（设计计划 §4.2）：asyncsend_v2 提交成功后发 phase=ACCEPTED；随后 getsendresult 查到真实结果后发 phase=CONFIRMED（带真正的成功/失败与失败原因）。aggregate_id 是 record_id。族级 subject，adapter 字段区分是谁发的——加第二个 channel:im 成员不需要改 infra-notification 的消费列表。",
+      "payload": {
+        "type": "object",
+        "required": ["record_id", "adapter", "phase"],
+        "properties": {
+          "record_id":         { "type": "string" },
+          "adapter":           { "type": "string", "enum": ["dingtalk"], "description": "族级成员标识，未来企业微信/飞书/Slack/Teams 各用自己的值" },
+          "phase":             { "type": "string", "enum": ["ACCEPTED", "CONFIRMED"] },
+          "success":           { "type": "boolean", "description": "只有 phase=CONFIRMED 时有意义" },
+          "error_code":        { "type": "string" },
+          "retryable":         { "type": "boolean", "description": "⚠️ 由本适配器判定，infra-notification 据此决定要不要重试（设计计划 §4.1），两边分工不能混" },
+          "external_task_id":  { "type": "string", "description": "钉钉的 task_id" }
+        }
+      }
+    }
+  ]
+}
