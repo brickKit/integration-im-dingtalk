@@ -13,7 +13,7 @@
 | 装配角色 | **`channel:im`**（族内成员：钉钉/企业微信/飞书/Slack/Teams，可多装并存，不互斥） |
 | 设计真相源 | 装配仓库 `docs/design/integration-im-dingtalk.md`——本文件与它冲突时，以那份为准，回来改这里 |
 
-⚠️⚠️ **本组件从未真机验证过钉钉开放平台**：阶段三 Task 9 建仓库时没有可用的钉钉沙盒/测试企业，用户明确决定跳过真机验证，只做到"能编译通过、内部逻辑用 `httptest` 模拟验证过"的程度。`backend/internal/dingtalk/` 里的 URL 路径、参数名、JSON 字段名、错误码分类都按公开文档写，从未打到真实服务器。等有真实测试企业凭据后需要补一次真机验证，届时大概率要修正字段名或错误码判断。
+⚠️ **2026-09-09 更新：用户提供了真实钉钉个人团队凭据，补了一轮真机验证**——建仓库时（03-阶段三 Task 9）没有可用的钉钉沙盒，只做到"能编译通过、内部逻辑用 `httptest` 模拟验证过"的程度；这次真机验证发现并修了两个真实 bug：① `GetSendResult` 假设的响应字段（`status`/`progress_in_percent`）根本不存在，真实响应是把收件人分到几个名单里，导致投递永远卡在 `ACCEPTED`；② `ClassifyError` 把"应用未开通所需权限"误判成可重试。**已验证通的路径**：`gettoken`（真实 Client ID/Secret 换到真实 access_token）、`topapi/v2/user/getbymobile`（真实手机号查到真实 userid）、`asyncsend_v2`（真实提交成功拿到真实 task_id）、`getsendresult`（真实响应确认已读）——四个接口的请求构造/响应解析全部核对过真实数据。**仍未验证**：钉钉的限流/频控行为、`getbymobile`/`asyncsend_v2` 之外权限缺失时的具体表现、除 `errcode=88` 外的其余错误码分类是否准确——`ClassifyError` 里没被真机验证过的分支仍是按公开文档/常识猜的。
 
 ## 边界
 
@@ -58,7 +58,9 @@
 | 把延迟回查 `getsendresult` 放进消费 `dispatch.im.v1` 的同一个事务里 | `time.Sleep` 几秒会一直占着数据库连接和这条消息的 inbox 声明，拖住整个消费循环的吞吐 | `backend/internal/consumer/consumer.go` `confirmLater`（独立 goroutine，独立事务） |
 | 建 `command_idempotency` 表 | 全项目核对后确认这张表只用于外部调用方提供 `idempotency_key` 的写命令 RPC，本组件没有任何写 RPC，事件消费幂等完全由 `event_inbox` 负责——从一开始就没建，别加回来 | `migrations/002_create_outbox_inbox.up.sql` 顶部注释 |
 | 给 `dingtalk_user_map` 开对外查询接口，或把手机号塞进事件 payload | 手机号是个人信息，这张表只在本组件内部使用（设计计划 §2） | `migrations/001_create_dingtalk.up.sql` |
-| 以为 `ClassifyError` 的错误码分类是真机验证过的 | 按 errmsg 关键词匹配，从未打到真实钉钉服务器验证——本文件顶部 ⚠️⚠️ | `backend/internal/dingtalk/classify.go` |
+| 以为 `ClassifyError`/`GetSendResult` 的每一条分支都真机验证过 | 2026-09-09 用真实钉钉个人团队验证过一部分（见本文件顶部 ⚠️⚠️ 的更新记录），但不是全部——没验证过的分支仍是按公开文档/常识猜的，改动前先看清楚这一条命中的是哪一类 | `backend/internal/dingtalk/classify.go`、`client.go` |
+| 假设 `GetSendResult` 的响应里有 `status`/`progress_in_percent` 字段 | **真实踩过的 bug**：真实响应根本没有这两个字段（是直接把收件人分到 `read_user_id_list`/`unread_user_id_list`/`failed_user_id_list`/`invalid_user_id_list`/`forbidden_list` 几个名单里，`forbidden_list` 也不是猜测的 `forbidden_user_id_list`）。按 `status>=2` 判"已完成"时字段不存在、零值恒为 0，会让延迟回查永远判不成"已完成"，一条已经真实送达的消息在 `notification_records` 里卡死在 `ACCEPTED` 直到轮次耗尽——真机测试第一次就复现了 | `backend/internal/dingtalk/client.go` `GetSendResult`/`SendResult` |
+| 在本组件的真实容器还部署着（`brickkit up` 起着、配了真实钉钉凭据）的时候跑 `go test ./...` | **真实踩过的坑**：`consumer_test.go` 直接往本机共享的 NATS（`nats://localhost:4222`）发布裸事件来测试消费逻辑；NATS 核心是广播，真实部署的容器同样订阅着 `infra.notification.dispatch.im.v1`，会把测试发的事件也当真事件处理一遍，真的调一次钉钉 API（本次测试期间意外触发了一次真实 `asyncsend_v2` 调用，因为撞上一条陈旧的 fake 缓存 userid 才没有真的打扰到人）。**测本组件前先 `docker stop` 掉真实容器**，测完再 `brickkit up` 起回来 | 全项目其余组件的 consumer_test.go 都有同样的广播风险，但只有本组件的副作用是"真的调外部付费/限流 API"，其余组件顶多是多写几行自己的库 |
 
 ## 改代码前的自查
 

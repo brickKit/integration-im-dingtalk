@@ -162,43 +162,54 @@ func (c *Client) SendWorkNotification(ctx context.Context, accessToken string, a
 	return resp.TaskID, nil
 }
 
-// SendResult 是 GetSendResult 的结果——设计计划 §4.2 第②步。
+// SendResult 是 GetSendResult 针对某一个 userid 的结果（设计计划 §4.2
+// 第②步）。
+//
+// ⚠️ 真机验证过（2026-09-09，真实钉钉个人团队）：这里最初假设响应里有
+// 一个 "status"/"progress_in_percent" 字段（0.1 版没有沙盒时照着钉钉
+// 文档某个版本的旧描述猜的），而真实响应根本没有这两个字段，是直接把
+// 收件人分类进几个名单（`read_user_id_list`/`unread_user_id_list`/
+// `failed_user_id_list`/`invalid_user_id_list`/`forbidden_list`——
+// 后一个字段名也不是猜测的 `forbidden_user_id_list`）。原先按
+// `status >= 2` 判"是否已完成"，字段不存在时零值恒为 0，永远判不成
+// "已完成"，会一直在延迟回查的退避循环里空转到轮次耗尽——这是一个真实
+// 会导致所有投递永远停在 ACCEPTED 直到超时的 bug，靠真实响应验证才
+// 发现。现在按"这个 userid 有没有出现在任意一个名单里"判断"是否已经
+// 有结果"：出现在已读/未读名单 = 成功，出现在失败/无效/禁止名单 =
+// 失败，哪个名单都没出现 = 还在处理中。
 type SendResult struct {
-	Done             bool // status 已经跑完（不代表全部成功，只代表"不用再查了"）
-	FailedUserIDs    []string
-	InvalidUserIDs   []string
-	ForbiddenUserIDs []string
-}
-
-// Success 判断这次发送对目标 userid 是不是真的成功——不在任何一个失败
-// 名单里就算成功（钉钉的语义：progress 完成后，没出现在失败/无效/禁止
-// 名单里的人就是送达了）。
-func (r *SendResult) Success(userid string) bool {
-	for _, list := range [][]string{r.FailedUserIDs, r.InvalidUserIDs, r.ForbiddenUserIDs} {
-		for _, u := range list {
-			if u == userid {
-				return false
-			}
-		}
-	}
-	return true
+	Done    bool   // 这个 userid 有没有出现在任意一个名单里
+	Success bool   // 只有 Done=true 时有意义
+	Reason  string // 只有 Done=true 且 Success=false 时有意义："SEND_FAILED"/"INVALID_USER"/"FORBIDDEN_USER"
 }
 
 type getSendResultResponse struct {
 	SendResult struct {
-		Status              int      `json:"status"` // 钉钉文档：2 表示已完成
-		ProgressInPercent   int      `json:"progress_in_percent"`
-		FailedUserIDList    []string `json:"failed_user_id_list"`
-		InvalidUserIDList   []string `json:"invalid_user_id_list"`
-		ForbiddenUserIDList []string `json:"forbidden_user_id_list"`
+		ReadUserIDList    []string `json:"read_user_id_list"`
+		UnreadUserIDList  []string `json:"unread_user_id_list"`
+		FailedUserIDList  []string `json:"failed_user_id_list"`
+		InvalidUserIDList []string `json:"invalid_user_id_list"`
+		ForbiddenList     []string `json:"forbidden_list"`
 	} `json:"send_result"`
 }
 
-const sendResultDoneStatus = 2
+func containsUserID(list []string, userid string) bool {
+	for _, u := range list {
+		if u == userid {
+			return true
+		}
+	}
+	return false
+}
 
-// GetSendResult 查一个 task_id 的真实投递结果（GET
+// GetSendResult 查一个 task_id 对某个 userid 的真实投递结果（GET
 // /topapi/message/corpconversation/getsendresult?access_token=&agent_id=&task_id=）。
-func (c *Client) GetSendResult(ctx context.Context, accessToken string, agentID, taskID int64) (*SendResult, error) {
+// ⚠️ 这个接口是按整个 task 查全部收件人分类名单，不是按 userid 查单个
+// 结果——本组件目前 `SendWorkNotification` 每次只发给一个 userid，所以
+// 这里直接在返回的名单里找这一个 userid 归到了哪一类；如果以后要支持
+// 一次发给多个 userid，这个函数要改成返回全量分类结果，不能再只认
+// 一个 userid。
+func (c *Client) GetSendResult(ctx context.Context, accessToken string, agentID, taskID int64, userid string) (*SendResult, error) {
 	q := url.Values{
 		"access_token": {accessToken},
 		"agent_id":     {strconv.FormatInt(agentID, 10)},
@@ -208,10 +219,17 @@ func (c *Client) GetSendResult(ctx context.Context, accessToken string, agentID,
 	if err := c.doJSON(ctx, http.MethodGet, "/topapi/message/corpconversation/getsendresult", q, nil, &resp); err != nil {
 		return nil, err
 	}
-	return &SendResult{
-		Done:             resp.SendResult.Status >= sendResultDoneStatus,
-		FailedUserIDs:    resp.SendResult.FailedUserIDList,
-		InvalidUserIDs:   resp.SendResult.InvalidUserIDList,
-		ForbiddenUserIDs: resp.SendResult.ForbiddenUserIDList,
-	}, nil
+	sr := resp.SendResult
+	switch {
+	case containsUserID(sr.ReadUserIDList, userid), containsUserID(sr.UnreadUserIDList, userid):
+		return &SendResult{Done: true, Success: true}, nil
+	case containsUserID(sr.FailedUserIDList, userid):
+		return &SendResult{Done: true, Success: false, Reason: "SEND_FAILED"}, nil
+	case containsUserID(sr.InvalidUserIDList, userid):
+		return &SendResult{Done: true, Success: false, Reason: "INVALID_USER"}, nil
+	case containsUserID(sr.ForbiddenList, userid):
+		return &SendResult{Done: true, Success: false, Reason: "FORBIDDEN_USER"}, nil
+	default:
+		return &SendResult{Done: false}, nil
+	}
 }

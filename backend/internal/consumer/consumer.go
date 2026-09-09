@@ -202,7 +202,7 @@ func confirmLater(ctx context.Context, db *sql.DB, role, schema string, r *repo.
 			backoff *= 2
 			continue
 		}
-		result, err := client.GetSendResult(ctx, token, agentID, taskID)
+		result, err := client.GetSendResult(ctx, token, agentID, taskID, userid)
 		if err != nil {
 			if dingtalk.IsTokenExpired(err) {
 				if _, rerr := tm.Refresh(ctx); rerr != nil {
@@ -219,8 +219,8 @@ func confirmLater(ctx context.Context, db *sql.DB, role, schema string, r *repo.
 			continue
 		}
 
-		success, retryable, errorCode := classifySendResult(result, userid)
-		if err := recordAndPublishConfirmed(ctx, db, role, schema, p, success, errorCode, retryable, taskID); err != nil {
+		retryable, errorCode := classifySendResult(result)
+		if err := recordAndPublishConfirmed(ctx, db, role, schema, p, result.Success, errorCode, retryable, taskID); err != nil {
 			logger.Error("落库/发布 CONFIRMED 结果失败", "record_id", p.RecordID, "error", err)
 		}
 		return
@@ -237,22 +237,19 @@ func confirmLater(ctx context.Context, db *sql.DB, role, schema string, r *repo.
 // classifySendResult 把 invalid/forbidden 名单（配置/权限类问题，钉钉
 // 那边"这个人本来就不该收到"）与 failed 名单（发送本身失败，更可能是
 // 临时故障）区分开——前者不值得重试，后者值得（同 dingtalk.ClassifyError
-// 的分工原则，这里的信息来自 getsendresult 而不是 errcode，所以单独判）。
-func classifySendResult(result *dingtalk.SendResult, userid string) (success, retryable bool, errorCode string) {
-	if result.Success(userid) {
-		return true, false, ""
+// 的分工原则，这里的信息来自 getsendresult 的分类名单而不是 errcode，
+// 所以单独判）。result.Reason 已经由 dingtalk.Client.GetSendResult
+// 按真实响应的名单归类过，这里只需要把"归到哪一类"翻成"值不值得重试"。
+func classifySendResult(result *dingtalk.SendResult) (retryable bool, errorCode string) {
+	if result.Success {
+		return false, ""
 	}
-	for _, u := range result.InvalidUserIDs {
-		if u == userid {
-			return false, false, "INVALID_USER"
-		}
+	switch result.Reason {
+	case "INVALID_USER", "FORBIDDEN_USER":
+		return false, result.Reason
+	default: // "SEND_FAILED" 或其它未来新增的分类
+		return true, result.Reason
 	}
-	for _, u := range result.ForbiddenUserIDs {
-		if u == userid {
-			return false, false, "FORBIDDEN_USER"
-		}
-	}
-	return false, true, "SEND_FAILED"
 }
 
 // recordAndPublishConfirmed 开自己的事务（confirmLater 跑在独立

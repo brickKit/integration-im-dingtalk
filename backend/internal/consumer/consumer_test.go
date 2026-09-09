@@ -96,14 +96,24 @@ func newFakeDingtalkServer(f *fakeDingtalk) *httptest.Server {
 		_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "errmsg": "ok", "task_id": 12345})
 	})
 	mux.HandleFunc("/topapi/message/corpconversation/getsendresult", func(w http.ResponseWriter, r *http.Request) {
+		// ⚠️ 真实钉钉响应没有 status/progress_in_percent 字段（2026-09-09
+		// 真机验证过，见 dingtalk 包 client_test.go 的
+		// TestGetSendResult_真实响应已读 注释）——"完不完成"看目标 userid
+		// 有没有出现在任意一个分类名单里，这里模拟的形状必须跟真实的一致，
+		// 否则这个假服务器验证不出那次真实踩过的坑。
 		n := atomic.AddInt32(&f.sendResultCalls, 1)
 		if n <= f.sendResultCallsBeforeDone {
 			_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "errmsg": "ok",
-				"send_result": map[string]any{"status": 1, "progress_in_percent": 50}})
+				"send_result": map[string]any{"read_user_id_list": []string{}, "unread_user_id_list": []string{}}})
+			return
+		}
+		if len(f.failUserIDs) > 0 {
+			_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "errmsg": "ok",
+				"send_result": map[string]any{"read_user_id_list": []string{}, "unread_user_id_list": []string{}, "failed_user_id_list": f.failUserIDs}})
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "errmsg": "ok",
-			"send_result": map[string]any{"status": 2, "progress_in_percent": 100, "failed_user_id_list": f.failUserIDs}})
+			"send_result": map[string]any{"read_user_id_list": []string{}, "unread_user_id_list": []string{"u-fake"}}})
 	})
 	return httptest.NewServer(mux)
 }

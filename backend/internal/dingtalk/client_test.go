@@ -117,15 +117,39 @@ func TestSendWorkNotification_请求体形状(t *testing.T) {
 	}
 }
 
-func TestGetSendResult_已完成且失败名单(t *testing.T) {
+// TestGetSendResult_真实响应已读 用的是 2026-09-09 真机验证时（真实钉钉
+// 个人团队 + 真实手机号）拿到的原始响应原文——不是编的样例。这条测试
+// 直接对应实现中真的踩出来过的 bug：最初以为响应里有一个
+// "status"/"progress_in_percent" 字段，`status >= 2` 才算"已完成"；
+// 真实响应根本没有这两个字段，零值恒为 0，永远判不成"已完成"，会让
+// 延迟回查一直在退避循环里空转到轮次耗尽——真机测试第一次就复现了：
+// 一条已经真实送达（钉钉 App 上收到了）的消息，在 notification_records
+// 里却卡死在 ACCEPTED 不再往前推进。
+func TestGetSendResult_真实响应已读(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("task_id") != "999" {
 			t.Fatalf("期望 task_id=999，实际 %s", r.URL.Query().Get("task_id"))
 		}
+		_, _ = w.Write([]byte(`{"errcode":0,"errmsg":"ok","send_result":{"failed_user_id_list":[],"forbidden_list":[],"invalid_dept_id_list":[],"invalid_user_id_list":[],"read_user_id_list":["036632523163121146"],"unread_user_id_list":[]},"request_id":"16kcs7iwwcvj6"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "ak", "as")
+	result, err := c.GetSendResult(context.Background(), "tok", 123, 999, "036632523163121146")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Done || !result.Success {
+		t.Fatalf("期望 Done=true Success=true（真实已读响应），实际 %+v", result)
+	}
+}
+
+func TestGetSendResult_失败名单(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"errcode": 0, "errmsg": "ok",
 			"send_result": map[string]any{
-				"status": 2, "progress_in_percent": 100,
+				"read_user_id_list": []string{}, "unread_user_id_list": []string{},
 				"failed_user_id_list": []string{"u123"},
 			},
 		})
@@ -133,36 +157,32 @@ func TestGetSendResult_已完成且失败名单(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "ak", "as")
-	result, err := c.GetSendResult(context.Background(), "tok", 123, 999)
+	result, err := c.GetSendResult(context.Background(), "tok", 123, 999, "u123")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Done {
-		t.Fatal("期望 Done=true（status=2）")
-	}
-	if result.Success("u123") {
-		t.Fatal("u123 在 failed 名单里，期望 Success 返回 false")
-	}
-	if !result.Success("u456") {
-		t.Fatal("u456 不在任何名单里，期望 Success 返回 true")
+	if !result.Done || result.Success || result.Reason != "SEND_FAILED" {
+		t.Fatalf("期望 Done=true Success=false Reason=SEND_FAILED，实际 %+v", result)
 	}
 }
 
-func TestGetSendResult_未完成(t *testing.T) {
+func TestGetSendResult_目标用户尚未出现在任何名单里视为未完成(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"errcode": 0, "errmsg": "ok",
-			"send_result": map[string]any{"status": 1, "progress_in_percent": 50},
+			"send_result": map[string]any{
+				"read_user_id_list": []string{}, "unread_user_id_list": []string{},
+			},
 		})
 	}))
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "ak", "as")
-	result, err := c.GetSendResult(context.Background(), "tok", 123, 999)
+	result, err := c.GetSendResult(context.Background(), "tok", 123, 999, "u123")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.Done {
-		t.Fatal("status=1 期望 Done=false")
+		t.Fatal("目标 userid 没出现在任何名单里，期望 Done=false（还在处理中，继续退避重试）")
 	}
 }
