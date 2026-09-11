@@ -4,7 +4,9 @@ kind: Component
 metadata:
   id: integration/im-dingtalk         # ⚠️ Fork 件必须与标准件完全一致（§3.4.1）
   name: 钉钉通道适配器
-  version: 1.0.2                      # 精确版本，不接受 ^ / ~ / latest
+  version: 1.0.3                      # 精确版本，不接受 ^ / ~ / latest
+                                       # v1.0.3：docs/手册.md 的 TEST_PG_DSN 示例改指向
+                                       # brickkit_test_db，纯文档，无行为/契约变更
                                        # 1.0.1：真机验证钉钉真实凭据时发现
                                        # "应用未开通所需权限"这类错误被误判成
                                        # 可重试，改判不可重试（真实响应验证过）
@@ -72,7 +74,7 @@ configSchema:
 
 deployment:
   type: container
-  image: brickenterprise/integration-im-dingtalk:1.0.2
+  image: brickenterprise/integration-im-dingtalk:1.0.3
   port: 8207                          # 端口册 registry/ports.tsv
   extraPorts:
     - { name: grpc, port: 9207 }      # → INTEGRATION_IM_DINGTALK_GRPC_ENDPOINT（值仍以 http:// 开头）
