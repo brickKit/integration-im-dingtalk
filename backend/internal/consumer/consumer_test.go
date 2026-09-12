@@ -50,6 +50,32 @@ func natsURLForTest(t *testing.T) string {
 	return nats.DefaultURL
 }
 
+// testSubject 给消费者测试造一个测试私有的 subject，不直接用生产真实
+// subject。
+//
+// ⚠️ 实测踩坑（docs/dev/field-tested-pitfalls-log.md 类别 E 的 E2，本组件
+// 自己的 AGENTS.md"这个组件特有的坑"一节原文点名过）：这几条测试原来
+// 直接订阅/发布到真实 subject "infra.notification.dispatch.im.v1"，而
+// 同一台机器上 `brickkit up` 真实跑着的本组件容器订阅的是**同一个**
+// subject——NATS 核心发布订阅对同一 subject 的多个订阅者是广播，真实
+// 容器会把测试发布的事件也当真事件处理一遍。本组件比其余组件更严重的
+// 地方在于：这不只是"读到了错误的产出"，副作用是**真的调一次钉钉的
+// 付费/限流外部 API**——2026-09-09 真机验证时真实撞上过一次（幸好当时
+// 命中一条陈旧的 fake 缓存 userid 才没真的打扰到人）。此前唯一的规避
+// 手段是"测本组件前先手动 docker stop 掉真实容器"，是人肉纪律，不是
+// 机制。
+//
+// 换一个测试私有的 subject 能从根上让真实容器完全收不到——它们只订阅
+// 生产 subject 字面量，不会去猜一个带随机后缀的名字，不再需要手动停
+// 容器这道人肉工序。这个换法是安全的：besdk.Consume 的 fn 只用
+// ev.Subject 拼错误信息，不拿它做任何业务判断，换成任意字符串不影响
+// 被测逻辑本身。这条规避法只适用于"测试直接构造/发布事件"的消费者
+// 测试——验证"真的发到了生产 subject 上"这件事本身的测试必须用真实
+// subject，不适用这个换法（本文件没有这类测试）。
+func testSubject(base string) string {
+	return fmt.Sprintf("test.%s.%d", base, time.Now().UnixNano())
+}
+
 func publishEvent(t *testing.T, nc *nats.Conn, subject, aggregateID string, version int64, payload string) {
 	t.Helper()
 	msg := &nats.Msg{Subject: subject, Data: []byte(payload), Header: nats.Header{}}
@@ -126,13 +152,13 @@ func dispatchPayloadJSON(recordID string, attempt int, targetAdapters []string, 
 	return string(b)
 }
 
-func runConsumeFor(t *testing.T, db *sql.DB, nc *nats.Conn, handle func(context.Context, *sql.Tx, besdk.Event) error, waitFor time.Duration, publish func(*nats.Conn)) {
+func runConsumeFor(t *testing.T, db *sql.DB, nc *nats.Conn, subject string, handle func(context.Context, *sql.Tx, besdk.Event) error, waitFor time.Duration, publish func(*nats.Conn)) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), waitFor+2*time.Second)
 	defer cancel()
 	done := make(chan struct{})
 	go func() {
-		_ = besdk.Consume(ctx, nc, db, testRole, testSchema, "infra.notification.dispatch.im.v1", handle)
+		_ = besdk.Consume(ctx, nc, db, testRole, testSchema, subject, handle)
 		close(done)
 	}()
 	time.Sleep(150 * time.Millisecond)
@@ -165,8 +191,9 @@ func TestDispatchHandler_target_adapters不含dingtalk时直接丢弃(t *testing
 	handler := dispatchHandler(db, testRole, testSchema, r, client, tm, 1, 200*time.Millisecond, slog.Default())
 
 	recordID := fmt.Sprintf("record-%d", time.Now().UnixNano())
-	runConsumeFor(t, db, nc, handler, 300*time.Millisecond, func(nc *nats.Conn) {
-		publishEvent(t, nc, "infra.notification.dispatch.im.v1", recordID, 1,
+	subj := testSubject("infra.notification.dispatch.im.v1")
+	runConsumeFor(t, db, nc, subj, handler, 300*time.Millisecond, func(nc *nats.Conn) {
+		publishEvent(t, nc, subj, recordID, 1,
 			dispatchPayloadJSON(recordID, 1, []string{"wecom"}, "13800000000"))
 	})
 
@@ -206,10 +233,11 @@ func TestDispatchHandler_成功提交后ACCEPTED_延迟回查后CONFIRMED(t *tes
 	handler := dispatchHandler(db, testRole, testSchema, r, client, tm, 1, confirmDelay, slog.Default())
 
 	recordID := fmt.Sprintf("record-%d", time.Now().UnixNano())
+	subj := testSubject("infra.notification.dispatch.im.v1")
 	// 延迟回查在独立 goroutine 里跑，退避两轮（200ms + 400ms），等待时间
 	// 要盖过这段时间。
-	runConsumeFor(t, db, nc, handler, 1200*time.Millisecond, func(nc *nats.Conn) {
-		publishEvent(t, nc, "infra.notification.dispatch.im.v1", recordID, 1,
+	runConsumeFor(t, db, nc, subj, handler, 1200*time.Millisecond, func(nc *nats.Conn) {
+		publishEvent(t, nc, subj, recordID, 1,
 			dispatchPayloadJSON(recordID, 1, []string{"dingtalk"}, "13800000000"))
 	})
 
@@ -281,8 +309,9 @@ func TestDispatchHandler_收件人不在企业内_不可重试且清缓存(t *te
 	}
 
 	recordID := fmt.Sprintf("record-%d", time.Now().UnixNano())
-	runConsumeFor(t, db, nc, handler, 300*time.Millisecond, func(nc *nats.Conn) {
-		publishEvent(t, nc, "infra.notification.dispatch.im.v1", recordID, 1,
+	subj := testSubject("infra.notification.dispatch.im.v1")
+	runConsumeFor(t, db, nc, subj, handler, 300*time.Millisecond, func(nc *nats.Conn) {
+		publishEvent(t, nc, subj, recordID, 1,
 			dispatchPayloadJSON(recordID, 1, []string{"dingtalk"}, phone))
 	})
 
