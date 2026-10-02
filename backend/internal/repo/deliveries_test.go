@@ -18,9 +18,8 @@ func mustRecordAttempt(t *testing.T, r *Repo, in RecordAttemptInput) {
 	}
 }
 
-// TestBatchGetLatestStatus_CONFIRMED优先于ACCEPTED 验证迁移文件顶部注释
-// 的判据："取最新一条，phase 优先级 CONFIRMED > ACCEPTED，同 phase 取
-// attempted_at 最大的"。
+// TestBatchGetLatestStatus_CONFIRMED优先于ACCEPTED 守"当前状态"的选取规则：
+// phase 优先级 CONFIRMED > ACCEPTED，同 phase 取 attempted_at 最大的。
 func TestBatchGetLatestStatus_CONFIRMED优先于ACCEPTED(t *testing.T) {
 	r := testRepo(t)
 	recordID := uniqueID("record")

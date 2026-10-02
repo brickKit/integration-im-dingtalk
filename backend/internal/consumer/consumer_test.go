@@ -52,28 +52,17 @@ func natsURLForTest(t *testing.T) string {
 	return nats.DefaultURL
 }
 
-// testSubject 给消费者测试造一个测试私有的 subject，不直接用生产真实
-// subject。
+// testSubject 给消费者测试造一个测试私有的 subject，不用生产 subject。
 //
-// ⚠️ 实测踩坑（docs/dev/field-tested-pitfalls-log.md 类别 E 的 E2，本组件
-// 自己的 AGENTS.md"这个组件特有的坑"一节原文点名过）：这几条测试原来
-// 直接订阅/发布到真实 subject "infra.notification.dispatch.im.v1"，而
-// 同一台机器上 `brickkit up` 真实跑着的本组件容器订阅的是**同一个**
-// subject——NATS 核心发布订阅对同一 subject 的多个订阅者是广播，真实
-// 容器会把测试发布的事件也当真事件处理一遍。本组件比其余组件更严重的
-// 地方在于：这不只是"读到了错误的产出"，副作用是**真的调一次钉钉的
-// 付费/限流外部 API**——2026-09-09 真机验证时真实撞上过一次（幸好当时
-// 命中一条陈旧的 fake 缓存 userid 才没真的打扰到人）。此前唯一的规避
-// 手段是"测本组件前先手动 docker stop 掉真实容器"，是人肉纪律，不是
-// 机制。
+// ⚠️ 同一台机器上 brickkit up 起着的本组件容器订阅的是生产 subject
+// infra.notification.dispatch.im.v1；NATS 核心订阅对同一 subject 的多个订阅者
+// 是广播，测试往生产 subject 发的事件会被真实容器当真事件处理——对本组件
+// 来说，副作用是真的调一次钉钉的外部 API（容器里配着真实凭据时会真的发出
+// 一条工作通知）。带随机后缀的测试私有 subject 真实容器收不到。
 //
-// 换一个测试私有的 subject 能从根上让真实容器完全收不到——它们只订阅
-// 生产 subject 字面量，不会去猜一个带随机后缀的名字，不再需要手动停
-// 容器这道人肉工序。这个换法是安全的：besdk.Consume 的 fn 只用
-// ev.Subject 拼错误信息，不拿它做任何业务判断，换成任意字符串不影响
-// 被测逻辑本身。这条规避法只适用于"测试直接构造/发布事件"的消费者
-// 测试——验证"真的发到了生产 subject 上"这件事本身的测试必须用真实
-// subject，不适用这个换法（本文件没有这类测试）。
+// 这样换是安全的：besdk.Consume 的 fn 只用 ev.Subject 拼错误信息，不拿它
+// 做业务判断。只适用于"测试自己构造并发布事件"的消费者测试；要验证"真的
+// 发到了生产 subject 上"的测试必须用真实 subject（本文件没有这类测试）。
 func testSubject(base string) string {
 	return fmt.Sprintf("test.%s.%d", base, time.Now().UnixNano())
 }
@@ -124,11 +113,10 @@ func newFakeDingtalkServer(f *fakeDingtalk) *httptest.Server {
 		_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "errmsg": "ok", "task_id": 12345})
 	})
 	mux.HandleFunc("/topapi/message/corpconversation/getsendresult", func(w http.ResponseWriter, r *http.Request) {
-		// ⚠️ 真实钉钉响应没有 status/progress_in_percent 字段（2026-09-09
-		// 真机验证过，见 dingtalk 包 client_test.go 的
-		// TestGetSendResult_真实响应已读 注释）——"完不完成"看目标 userid
-		// 有没有出现在任意一个分类名单里，这里模拟的形状必须跟真实的一致，
-		// 否则这个假服务器验证不出那次真实踩过的坑。
+		// ⚠️ 真实钉钉响应没有 status / progress_in_percent 字段（见 dingtalk
+		// 包的 TestGetSendResult_真实响应已读）——"完不完成"看目标 userid 有没有
+		// 出现在任意一个分类名单里。这里模拟的形状必须与真实的一致，否则假
+		// 服务器验证不出"照着不存在的字段判完成"这类错误。
 		n := atomic.AddInt32(&f.sendResultCalls, 1)
 		if n <= f.sendResultCallsBeforeDone {
 			_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "errmsg": "ok",
@@ -171,10 +159,9 @@ func runConsumeFor(t *testing.T, db *sql.DB, nc *nats.Conn, subject string, hand
 	<-done
 }
 
-// TestDispatchHandler_target_adapters不含dingtalk时直接丢弃 是设计计划
-// §4 明文要求的自我过滤断言：channel:im 族的适配器共用同一个 subject，
-// NATS 核心是广播，漏了这一步会导致装了多个 IM 通道的客户每条通知
-// 收到多遍。
+// TestDispatchHandler_target_adapters不含dingtalk时直接丢弃 守的是自我过滤：
+// channel:im 族的适配器共用同一个 subject，NATS 核心订阅是广播，漏了这一步，
+// 装了多个 IM 通道的客户每条通知会收到多遍。
 func TestDispatchHandler_target_adapters不含dingtalk时直接丢弃(t *testing.T) {
 	db := testDB(t)
 	nc, err := nats.Connect(natsURLForTest(t))
@@ -274,9 +261,9 @@ func TestDispatchHandler_成功提交后ACCEPTED_延迟回查后CONFIRMED(t *tes
 	}
 }
 
-// TestDispatchHandler_收件人不在企业内_不可重试且清缓存 验证设计计划
-// §4.1 的分工：asyncsend_v2 本身失败（这里用一个总是失败的 fake server
-// 模拟"用户不存在"）时直接落 CONFIRMED 失败，不经过 ACCEPTED。
+// TestDispatchHandler_收件人不在企业内_不可重试且清缓存 守的是错误分类的分工：
+// asyncsend_v2 本身失败（这里用一个总是失败的 fake server 模拟"不在企业内"）
+// 时直接落 CONFIRMED 失败、不可重试，不经过 ACCEPTED。
 func TestDispatchHandler_收件人不在企业内_不可重试且清缓存(t *testing.T) {
 	db := testDB(t)
 	nc, err := nats.Connect(natsURLForTest(t))
@@ -288,8 +275,8 @@ func TestDispatchHandler_收件人不在企业内_不可重试且清缓存(t *te
 	// ⚠️ 缓存预先写好一条 stale-userid（模拟"这个人之前解析过，后来离职
 	// 了，缓存还没失效"）——resolveUserID 命中缓存后不会再调
 	// getbymobile，真正触发失败的是发送本身（asyncsend_v2 返回"这个人
-	// 不在企业内"，这才是设计计划 §2 过期策略描述的真实场景：发送失败
-	// 且错误码是"用户不存在"时才清缓存，不是解析阶段）。
+	// 不在企业内"，这正是缓存过期策略针对的场景：发送失败且错误是"用户
+	// 不存在"时才清缓存，不是解析阶段）。
 	mux := http.NewServeMux()
 	mux.HandleFunc("/gettoken", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "errmsg": "ok", "access_token": "tok", "expires_in": 7200})

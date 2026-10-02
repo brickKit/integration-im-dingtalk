@@ -18,12 +18,10 @@ func TestClassifyError_用户不存在不可重试且清缓存(t *testing.T) {
 	}
 }
 
-// TestClassifyError_应用未开通权限不可重试 用的是 2026-09-09 真机验证时
-// 从真实钉钉服务器拿到的原始响应（个人测试团队 + 未开通
-// qyapi_get_member_by_mobile 权限，调 topapi/v2/user/getbymobile 触发）——
-// 不是编出来的样例。这条错误此前落进"区分不了"的默认可重试桶，会白白
-// 重试 3 次才放弃；权限问题需要人去开发者后台点一次"申请权限"，重试
-// 不会自愈，已改判不可重试。
+// TestClassifyError_应用未开通权限不可重试 用的是真实钉钉服务器返回的原始
+// 响应（测试团队的应用没开通 qyapi_get_member_by_mobile 权限时调
+// topapi/v2/user/getbymobile 拿到的），不是编出来的样例。权限问题要人去开发者
+// 后台开通，重试不会自愈；落进"区分不了"的默认可重试桶会白白重试几次才放弃。
 func TestClassifyError_应用未开通权限不可重试(t *testing.T) {
 	realMsg := `ding talk error[subcode=60011,submsg=应用尚未开通所需的权限：[qyapi_get_member_by_mobile]，点击链接申请并开通即可：https://open-dev.dingtalk.com/appscope/apply?content=dingaq7iiv6ps2sgn3rt%23qyapi_get_member_by_mobile, {requiredScopes=[qyapi_get_member_by_mobile]}]`
 	retryable, code, evict := ClassifyError(&APIError{Code: 88, Msg: realMsg})

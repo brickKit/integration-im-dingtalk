@@ -27,7 +27,7 @@ func TestUserMap_写入命中_删除后未命中(t *testing.T) {
 		t.Fatalf("期望 ok=true userid=u-1，实际 ok=%v userid=%q", ok, userid)
 	}
 
-	// 设计计划 §2 的过期策略：发送失败且"用户不存在"时删掉这一行。
+	// 缓存的过期策略：发送失败且"用户不存在"时删掉这一行。
 	if err := r.DeleteUserID(ctx, phone); err != nil {
 		t.Fatal(err)
 	}

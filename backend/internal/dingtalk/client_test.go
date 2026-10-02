@@ -10,10 +10,9 @@ import (
 	"time"
 )
 
-// 这些测试用 httptest.Server 模拟钉钉开放平台的接口形状（按公开文档写的
-// 请求/响应约定），验证的是本组件自己的请求构造与响应解析逻辑——不是
-// "钉钉真的这样回"，那部分按既定决策（03-阶段三 Task 9）本阶段跳过，
-// 等有真实测试企业时要再补一次真机验证。
+// 这些测试用 httptest.Server 模拟钉钉开放平台的接口，验证本组件自己的请求
+// 构造与响应解析。模拟的响应形状对照过真实钉钉的响应；带"真实响应"字样的
+// 测试用的就是真实响应原文。
 
 func TestFetchAccessToken_解析成功响应(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -118,14 +117,11 @@ func TestSendWorkNotification_请求体形状(t *testing.T) {
 	}
 }
 
-// TestGetSendResult_真实响应已读 用的是 2026-09-09 真机验证时（真实钉钉
-// 个人团队 + 真实手机号）拿到的原始响应原文——不是编的样例。这条测试
-// 直接对应实现中真的踩出来过的 bug：最初以为响应里有一个
-// "status"/"progress_in_percent" 字段，`status >= 2` 才算"已完成"；
-// 真实响应根本没有这两个字段，零值恒为 0，永远判不成"已完成"，会让
-// 延迟回查一直在退避循环里空转到轮次耗尽——真机测试第一次就复现了：
-// 一条已经真实送达（钉钉 App 上收到了）的消息，在 notification_records
-// 里却卡死在 ACCEPTED 不再往前推进。
+// TestGetSendResult_真实响应已读 用的是真实钉钉返回的原始响应原文（真实团队
+// + 真实手机号），不是编的样例。它守的是：响应里没有 status /
+// progress_in_percent 这类进度字段，"已完成"只能看收件人出现在哪个名单。
+// 照着进度字段判，零值恒为 0，回查永远判不成完成——已经送达的消息会在通知
+// 中心一直停在 ACCEPTED。
 func TestGetSendResult_真实响应已读(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("task_id") != "999" {
