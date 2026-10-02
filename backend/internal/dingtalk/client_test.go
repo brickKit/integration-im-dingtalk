@@ -212,3 +212,83 @@ func TestClient_网络层错误不带出appsecret与access_token(t *testing.T) {
 		t.Fatalf("错误里应保留接口路径便于排障，实际：%v", err)
 	}
 }
+
+// DINGTALK_BASE_URL 配了一个解析不了的值时，建请求就失败。url.Parse 返回的
+// *url.Error 同样带完整 URL（含 query），不能原样进错误文本。
+func TestClient_建请求失败的错误不带出appsecret与access_token(t *testing.T) {
+	c := NewClient("http://bad host", "ak1", "secret-should-not-leak")
+	_, _, err := c.FetchAccessToken(context.Background())
+	if err == nil {
+		t.Fatal("期望建请求失败")
+	}
+	if strings.Contains(err.Error(), "secret-should-not-leak") {
+		t.Fatalf("gettoken 建请求失败的错误带出了 appsecret：%v", err)
+	}
+
+	_, err = c.GetUserIDByMobile(context.Background(), "token-should-not-leak", "13800000000")
+	if err == nil {
+		t.Fatal("期望建请求失败")
+	}
+	if strings.Contains(err.Error(), "token-should-not-leak") {
+		t.Fatalf("getbymobile 建请求失败的错误带出了 access_token：%v", err)
+	}
+	if !strings.Contains(err.Error(), "/topapi/v2/user/getbymobile") {
+		t.Fatalf("错误里应保留接口路径便于排障，实际：%v", err)
+	}
+}
+
+// gettoken 调用成功（errcode=0）但第二次解码失败（比如字段类型变了）时，
+// 响应原文里就是刚拿到的 access_token，不能进错误文本。
+func TestClient_响应解码失败的错误不带出access_token(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"errcode":0,"access_token":"tok-should-not-leak","expires_in":"7200"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "ak1", "secret-should-not-leak")
+	_, _, err := c.FetchAccessToken(context.Background())
+	if err == nil {
+		t.Fatal("期望解码失败")
+	}
+	if strings.Contains(err.Error(), "tok-should-not-leak") {
+		t.Fatalf("解码失败的错误带出了 access_token：%v", err)
+	}
+	if !strings.Contains(err.Error(), "/gettoken") {
+		t.Fatalf("错误里应保留接口路径便于排障，实际：%v", err)
+	}
+}
+
+// 中间的代理或网关回了一个不是 JSON 的错误页，页面上回显了请求 URL
+// （DINGTALK_BASE_URL 可以指向企业代理）。错误文本里只写状态码、
+// Content-Type 与字节数，不放原文。
+func TestClient_非JSON响应的错误不带出原文(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("<html>Bad gateway for " + r.URL.RequestURI() + "</html>"))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "ak1", "secret-should-not-leak")
+	_, _, err := c.FetchAccessToken(context.Background())
+	if err == nil {
+		t.Fatal("期望解析失败")
+	}
+	if strings.Contains(err.Error(), "secret-should-not-leak") {
+		t.Fatalf("非 JSON 响应的错误带出了 appsecret：%v", err)
+	}
+
+	_, err = c.GetUserIDByMobile(context.Background(), "token-should-not-leak", "13800000000")
+	if err == nil {
+		t.Fatal("期望解析失败")
+	}
+	if strings.Contains(err.Error(), "token-should-not-leak") {
+		t.Fatalf("非 JSON 响应的错误带出了 access_token：%v", err)
+	}
+	for _, want := range []string{"/topapi/v2/user/getbymobile", "502", "text/html"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("错误里应有 %q 便于排障，实际：%v", want, err)
+		}
+	}
+}

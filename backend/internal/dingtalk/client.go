@@ -6,6 +6,11 @@
 // 四个接口的路径、参数名与响应字段都对照过真实钉钉的响应（用一个真实的
 // 钉钉团队应用调通过）。错误分类（classify.go）里只有两个分支见过真实
 // 响应，其余按公开文档推断，各分支的注释写明是哪种。
+//
+// 本包返回的错误文本里不放请求 URL，也不放响应原文：URL 的 query 里是
+// AppSecret（gettoken）或 access_token（其余接口），gettoken 的响应原文里是
+// 新拿到的 access_token，而这些错误会进日志、GetChannelHealth 的 last_error
+// 与 HTTP 500 响应体。见 withoutURL、decodeError。
 package dingtalk
 
 import (
@@ -54,6 +59,12 @@ type apiEnvelope struct {
 
 // doJSON 是四个接口共用的请求/响应骨架：GET 或 POST，JSON body（GET 时
 // body 传 nil），解出 errcode/errmsg，非零则包成 *APIError。
+//
+// ⚠️ 这里返回的错误会进日志、GetChannelHealth 的 last_error 和
+// POST /admin/token/refresh 的 500 响应体，所以错误文本里不放请求 URL，
+// 也不放响应原文：gettoken 的 query 是 appsecret、其余接口的 query 是
+// access_token；gettoken 的响应原文里是新拿到的 access_token；代理回的错误页
+// 可能回显请求 URL。排障信息只给方法、路径、HTTP 状态码、Content-Type 与字节数。
 func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, body any, out any) error {
 	var reqBody io.Reader
 	if body != nil {
@@ -69,45 +80,53 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	}
 	req, err := http.NewRequestWithContext(ctx, method, u, reqBody)
 	if err != nil {
-		return fmt.Errorf("建请求: %w", err)
+		return fmt.Errorf("建请求: %w", withoutURL(err, method, path))
 	}
 	if reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("调用钉钉 API 失败（网络层）: %w", withoutQuery(err, method, c.baseURL+path))
+		return fmt.Errorf("调用钉钉 API 失败（网络层）: %w", withoutURL(err, method, path))
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("读钉钉响应体: %w", err)
+		return fmt.Errorf("读钉钉响应体（%s %s）: %w", method, path, withoutURL(err, method, path))
 	}
 
 	var env apiEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return fmt.Errorf("解析钉钉响应体: %w（原文: %s）", err, string(raw))
+		return decodeError(err, method, path, resp, len(raw))
 	}
 	if env.ErrCode != 0 {
 		return &APIError{Code: env.ErrCode, Msg: env.ErrMsg}
 	}
 	if out != nil {
 		if err := json.Unmarshal(raw, out); err != nil {
-			return fmt.Errorf("解析钉钉响应体: %w（原文: %s）", err, string(raw))
+			return decodeError(err, method, path, resp, len(raw))
 		}
 	}
 	return nil
 }
 
-// withoutQuery 去掉网络层错误里的 query：Go 的 *url.Error 带完整 URL，而
-// gettoken 的 query 是 appsecret、其余接口是 access_token，这些错误会进日志
-// 和 GetChannelHealth 的 last_error。只留方法与路径，底层原因原样保留。
-func withoutQuery(err error, method, u string) error {
+// withoutURL 把错误链上的 *url.Error 换成"方法 路径: 底层原因"：Go 的
+// *url.Error（建请求时 url.Parse 失败、网络层失败都是它）带完整 URL，含 query
+// 里的 appsecret / access_token。底层原因原样保留（%w），errors.Is 照常可用。
+func withoutURL(err error, method, path string) error {
 	var ue *url.Error
 	if errors.As(err, &ue) {
-		return fmt.Errorf("%s %s: %w", method, u, ue.Err)
+		return fmt.Errorf("%s %s: %w", method, path, ue.Err)
 	}
 	return err
+}
+
+// decodeError 是响应体解不开时的错误：只写状态码、Content-Type 与字节数，
+// 不写原文（原文可能是刚拿到的 access_token，或回显了请求 URL 的代理错误页）。
+// encoding/json 的错误文本本身不含响应里的值，可以原样包进来。
+func decodeError(err error, method, path string, resp *http.Response, n int) error {
+	return fmt.Errorf("解析钉钉响应体（%s %s，HTTP %d，Content-Type %q，%d 字节）: %w",
+		method, path, resp.StatusCode, resp.Header.Get("Content-Type"), n, err)
 }
 
 type getTokenResponse struct {

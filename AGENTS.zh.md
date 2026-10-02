@@ -12,7 +12,7 @@
 | `backend/cmd/server/main.go` | 一行 `besdk.RunStandalone(module.New)` |
 | `backend/cmd/migrate/main.go` | 一行 `migrate.Main(migrations.FS)`：迁移容器的入口（`./migrate up`） |
 | `backend/internal/consumer/consumer.go` | 发消息的唯一路径：消费派发事件、按 `target_adapters` 过滤、解析 userid、发送、记 `ACCEPTED`、在 goroutine 里回查 `getsendresult`、记 `CONFIRMED`；`recordResultTx` 在一个事务里写投递尝试与结果事件 |
-| `backend/internal/dingtalk/client.go` | 钉钉的四个 HTTP 调用（`gettoken`、`getbymobile`、`asyncsend_v2`、`getsendresult`），10 秒超时，网络层错误去掉 query（`withoutQuery`） |
+| `backend/internal/dingtalk/client.go` | 钉钉的四个 HTTP 调用（`gettoken`、`getbymobile`、`asyncsend_v2`、`getsendresult`），10 秒超时，错误文本里不放请求 URL 也不放响应原文（`withoutURL`、`decodeError`） |
 | `backend/internal/dingtalk/classify.go` | `ClassifyError`（可不可重试、要不要清手机号缓存）与 `IsTokenExpired` |
 | `backend/internal/tokenmgr/tokenmgr.go` | `access_token` 的缓存与刷新：`EnsureValid`（互斥锁下的单飞）与 `Refresh`（无条件） |
 | `backend/internal/repo/` | `token.go`（单行表 `dingtalk_token`）、`usermap.go`（手机号 → userid 缓存）、`deliveries.go`（`delivery_attempts`、`BatchGetLatestStatus`、`ListDeliveries`） |
@@ -69,7 +69,7 @@ PG_HOST=localhost PG_PORT=5432 PG_DATABASE=brickkit_test_db PG_USER=integration_
 | 发布 `integration.im.result.v1` 时 version 不跨阶段、跨重试递增 | 通知中心把后到的结果当重复静默丢掉 | 它的 inbox 对每个 `record_id` 只收严格更大的 version；`recordResultTx` 里保持 `attempt × 10 + phase` |
 | 在消费事务里回查 `getsendresult` | 吞吐崩掉：每条消息都占着一个连接和它的 inbox 声明好几秒 | 回查在 `confirmLater` 里做，那是派发事务之外的 goroutine，自己开事务写 |
 | 按 `getsendresult` 的某个进度字段判"已完成" | 已送达的消息一直停在 `ACCEPTED`，直到回查轮数用完 | 真实响应没有进度字段，只有收件人名单 |
-| 把请求 URL 或原始的 `*url.Error` 放进错误、日志或 `last_error` | 钉钉不可达时，AppSecret（gettoken 的 query）或 access_token 出现在日志与 `GetChannelHealth` 的响应里 | `withoutQuery` 只留方法与路径 |
+| 把请求 URL、原始的 `*url.Error` 或响应原文放进错误、日志或 `last_error` | AppSecret（gettoken 的 query）或 access_token（其余接口的 query，或 gettoken 刚返回的响应体）出现在日志、`GetChannelHealth` 的响应和 `POST /admin/token/refresh` 的 `500` 响应体里：钉钉不可达、`DINGTALK_BASE_URL` 解析不了、响应解不开、代理错误页回显了 URL，都会这样 | 错误文本里不放请求 URL，也不放响应原文：`withoutURL` 把任何 `*url.Error` 只留方法与路径，`decodeError` 只报状态码、Content-Type 与字节数 |
 | 往 `infra.notification.dispatch.im.v1` 发测试事件 | 在跑的本组件容器把它当真事件处理，真的调钉钉 API | 用 `testSubject`；只有生产容器监听生产 subject |
 | 新增分区表却不加进 `backend/internal/partition/` | 一切都过，直到迁移建的分区用完后的第一条写入："no partition of relation found for row"，每条派发都失败 | 迁移只建最初的分区，其余靠这个循环 |
 | 写碰 `dingtalk_token` 的测试却不调 `testlock.TokenRow` | `go test ./...` 下测试随机失败 | 这张表只有一行，测试包之间并行跑 |
