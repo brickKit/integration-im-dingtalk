@@ -51,6 +51,27 @@ func TestBatchGetLatestStatus_查不到的id直接省略(t *testing.T) {
 	}
 }
 
+// 契约（im.proto 的 BatchGetDeliveryStatusResponse）写明结果顺序与请求的
+// record_ids 一致、查不到的省略：调用方按位置对回自己的列表。
+func TestBatchGetLatestStatus_结果顺序与请求一致_查不到的省略(t *testing.T) {
+	r := testRepo(t)
+	first, second := uniqueID("record-z"), uniqueID("record-a") // 按字典序 second 在前
+	mustRecordAttempt(t, r, RecordAttemptInput{RecordID: first, Phase: PhaseAccepted})
+	mustRecordAttempt(t, r, RecordAttemptInput{RecordID: second, Phase: PhaseAccepted})
+
+	statuses, err := r.BatchGetLatestStatus(context.Background(), []string{first, uniqueID("missing"), second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(statuses))
+	for _, st := range statuses {
+		got = append(got, st.RecordID)
+	}
+	if len(got) != 2 || got[0] != first || got[1] != second {
+		t.Fatalf("期望顺序 [%s %s]，实际 %v", first, second, got)
+	}
+}
+
 func TestListDeliveries_按record_id过滤(t *testing.T) {
 	r := testRepo(t)
 	recordA := uniqueID("record")

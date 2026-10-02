@@ -65,16 +65,17 @@ func scanDeliveryRows(rows *sql.Rows, d *DeliveryAttempt) error {
 	return rows.Scan(&d.ID, &d.RecordID, &d.Adapter, &d.Phase, &d.Success, &d.ErrorCode, &d.Retryable, &d.ExternalTaskID, &d.AttemptedAt)
 }
 
-// BatchGetLatestStatus 是防 N+1 的唯一合法批量读方式（§3.8），供
-// gRPC BatchGetDeliveryStatus 用。同一个 record_id 可能有多条尝试
-// （初次 + 重试各一轮 ACCEPTED/CONFIRMED），取"当前最新状态"的判据是
-// phase 优先级 CONFIRMED > ACCEPTED，同 phase 取 attempted_at 最大的
-// 那条（同迁移文件顶部注释）。
+// BatchGetLatestStatus 是按 record_id 批量查投递状态的唯一读法（调用方不该
+// 逐条查，免得 N+1），供 gRPC BatchGetDeliveryStatus 用。同一个 record_id
+// 可能有多条尝试（初次与每次重试各有 ACCEPTED / CONFIRMED），"当前状态"取
+// CONFIRMED 优先、同 phase 取 attempted_at 最新的那条。结果按请求里
+// recordIDs 的顺序排（契约约定，调用方按位置对回），查不到的省略，重复的
+// id 只出现一次。
 func (r *Repo) BatchGetLatestStatus(ctx context.Context, recordIDs []string) ([]*DeliveryAttempt, error) {
 	if len(recordIDs) == 0 {
 		return nil, nil
 	}
-	var out []*DeliveryAttempt
+	latest := make(map[string]*DeliveryAttempt, len(recordIDs))
 	err := besdk.WithTx(ctx, r.db, r.role, r.schema, func(tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, deliverySelectColumns+`
 			FROM delivery_attempts
@@ -84,25 +85,29 @@ func (r *Repo) BatchGetLatestStatus(ctx context.Context, recordIDs []string) ([]
 			return err
 		}
 		defer rows.Close()
-		seen := make(map[string]bool, len(recordIDs))
 		for rows.Next() {
 			var d DeliveryAttempt
 			if err := scanDeliveryRows(rows, &d); err != nil {
 				return err
 			}
-			// ORDER BY 已经把每个 record_id 最想要的那条排在最前面——
-			// 用 seen 只取每个 record_id 第一次出现的那行（同 DISTINCT ON
-			// 的效果，这里不用 DISTINCT ON 是因为它要求 ORDER BY 的前缀
-			// 列必须与 DISTINCT ON 的列完全一致，写法上不如显式判断直观）。
-			if seen[d.RecordID] {
-				continue
+			// ORDER BY 已把每个 record_id 想要的那条排在最前，只留第一次出现的。
+			if _, seen := latest[d.RecordID]; !seen {
+				latest[d.RecordID] = &d
 			}
-			seen[d.RecordID] = true
-			out = append(out, &d)
 		}
 		return rows.Err()
 	})
-	return out, wrap("批量查投递状态", err)
+	if err != nil {
+		return nil, wrap("批量查投递状态", err)
+	}
+	out := make([]*DeliveryAttempt, 0, len(latest))
+	for _, id := range recordIDs {
+		if d, ok := latest[id]; ok {
+			out = append(out, d)
+			delete(latest, id) // 请求里重复的 id 只返回一次
+		}
+	}
+	return out, nil
 }
 
 // ListInput 是 ListDeliveries 的查询参数——排障视图，data_scopes: none，
