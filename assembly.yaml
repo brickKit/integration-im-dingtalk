@@ -14,7 +14,7 @@ data:
   role:   integration_im_dingtalk_rw    # 登录角色，`PG_USER` 的值
 
 # ⚠️ 本组件没有面向用户的数据，只有运维排障用的投递记录——省略
-# data_scopes 会被 be-ops 当场拦下（导读第 22 条），"不需要"必须显式写。
+# data_scopes 会被 be-ops 当场拦下，"不需要"必须显式写成 none。
 data_scopes: none
 
 permissions:
