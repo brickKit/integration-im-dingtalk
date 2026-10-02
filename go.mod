@@ -4,11 +4,18 @@ go 1.25.11
 
 require (
 	github.com/brickKit/be-sdk-go v0.4.0
+	github.com/brickKit/integration-im-dingtalk/gen/integration/im v1.0.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/nats-io/nats.go v1.53.1
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 )
+
+// gen/integration/im 是本仓库里嵌套的独立模块：调用方只 require 契约包、不拉整个
+// 组件，进同一个外壳时最小版本选择只选出一份生成代码，protobuf 注册表不会重复
+// 注册。模块路径不能以 /v1 结尾，所以边界切在 v1 的上一级。下面的 replace 只给
+// 本仓库自己构建用；别人拉取时用的是 require 里的契约包 tag。
+replace github.com/brickKit/integration-im-dingtalk/gen/integration/im => ./gen/integration/im
 
 require (
 	github.com/golang-migrate/migrate/v4 v4.20.1 // indirect
@@ -19,7 +26,6 @@ require (
 	github.com/MicahParks/jwkset v0.11.3 // indirect
 	github.com/MicahParks/keyfunc/v3 v3.8.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/brickKit/integration-im-dingtalk/gen/integration/im v1.0.0
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
@@ -81,5 +87,3 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/brickKit/integration-im-dingtalk/gen/integration/im => ./gen/integration/im
