@@ -1,7 +1,6 @@
-// Package http 是 integration-im-dingtalk 的 REST 面（族级前缀
-// /integration/im，不是 /integration/im-dingtalk——设计计划 §3）。两个
-// 端点都是排障/应急用，权限键统一 integration.im.admin（同
-// assembly.yaml 里两行permissions 共用一个 key 的设计）。
+// Package http 是本组件的 REST 面，挂在族级前缀 /integration/im 下（不是
+// /integration/im-dingtalk）。两个端点都是排障 / 应急用，共用一个权限键
+// integration.im.admin。
 package http
 
 import (

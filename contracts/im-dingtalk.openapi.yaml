@@ -4,10 +4,10 @@ info:
   version: 1.0.0
   description: |
     对外 REST 面，路径挂在 `/integration/im/**`——这是 channel:im 族级
-    前缀（设计计划 §3），不是 `/integration/im-dingtalk/**`。
+    前缀，不是 `/integration/im-dingtalk/**`。
 
-    ⚠️ 没有 webhook 回调入口：钉钉的工作通知是单向推送，不需要回调地址
-    （设计计划 §3）。这里只有两个排障用的管理端点。
+    ⚠️ 没有 webhook 回调入口：钉钉的工作通知是单向推送，不需要回调地址。
+    这里只有两个排障用的管理端点，权限键都是 integration.im.admin。
 
 paths:
   /integration/im/admin/deliveries:

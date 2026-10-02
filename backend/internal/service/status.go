@@ -8,9 +8,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// ToStatus 把 repo 层的哨兵错误翻成 gRPC status——HTTP 与 gRPC 两条对外
-// 接口共用同一套业务错误类型（同 infra-workflow/infra-notification 的
-// 既有判据）。
+// ToStatus 把 repo 层的哨兵错误翻成 gRPC status：HTTP 与 gRPC 两条对外接口
+// 共用同一套业务错误，HTTP 侧由 besdk.NewGinEngine 再映射成状态码。
 func ToStatus(err error) error {
 	if err == nil {
 		return nil

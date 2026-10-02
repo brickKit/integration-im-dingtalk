@@ -17,9 +17,8 @@ const (
 	PhaseConfirmed = "CONFIRMED"
 )
 
-// DeliveryAttempt 是 delivery_attempts 的一行——写入即终态，不改（设计
-// 计划 §2）。ACCEPTED 与 CONFIRMED 是同一个 record_id 的两条独立记录，
-// 不是同一行原地更新。
+// DeliveryAttempt 是 delivery_attempts 的一行，写入即终态、不改。ACCEPTED 与
+// CONFIRMED 是同一个 record_id 的两条独立记录，不是同一行原地更新。
 type DeliveryAttempt struct {
 	ID             int64
 	RecordID       string
@@ -41,12 +40,9 @@ type RecordAttemptInput struct {
 	ExternalTaskID string
 }
 
-// RecordDeliveryAttemptTx 供两处调用：① besdk.Consume 给的事务里，
-// 提交 asyncsend_v2 后记 ACCEPTED；② 延迟回查 goroutine 自己开的
-// besdk.WithTx 里，查到 getsendresult 后记 CONFIRMED（consumer 包的
-// module 级说明）。两处都要求"记录 + 发 integration.im.result.v1"在同一
-// 个事务里（Outbox Pattern），所以只导出 Tx 版本，不提供自带事务的
-// 便捷方法——调用方（consumer 包）decide 要不要在同一个 tx 里顺带发事件。
+// RecordDeliveryAttemptTx 只有事务版本：调用方（consumer 包）总是在同一个
+// 事务里顺带把 integration.im.result.v1 写进 outbox（Outbox 模式），自带事务
+// 的便捷方法会让"记了尝试却没发事件"成为可能。
 func RecordDeliveryAttemptTx(ctx context.Context, tx *sql.Tx, in RecordAttemptInput) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO delivery_attempts
@@ -110,8 +106,8 @@ func (r *Repo) BatchGetLatestStatus(ctx context.Context, recordIDs []string) ([]
 	return out, nil
 }
 
-// ListInput 是 ListDeliveries 的查询参数——排障视图，data_scopes: none，
-// 不做任何数据权限过滤（assembly.yaml 显式声明）。
+// ListInput 是 ListDeliveries 的查询参数。排障视图没有数据范围
+// （assembly.yaml 的 data_scopes: none），不按调用者过滤。
 type ListInput struct {
 	RecordID string // 空 = 不筛
 	Phase    string // 空 = 不筛

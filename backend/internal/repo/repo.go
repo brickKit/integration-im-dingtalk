@@ -1,6 +1,6 @@
 // Package repo 是 integration-im-dingtalk 的数据访问层：钉钉 access_token
-// 缓存、手机号→userid 缓存、投递尝试记录。三条铁律在这一层的体现是
-// "零表连业务库"——本组件只存自己的三张表 + 标准 Outbox/Inbox。
+// 缓存、手机号→userid 缓存、投递尝试记录。只有本组件自己 schema 里的三张表
+// 与标准的 Outbox / Inbox，不读任何别的组件的表。
 package repo
 
 import (

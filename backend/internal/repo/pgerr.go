@@ -2,8 +2,8 @@ package repo
 
 import "errors"
 
-// pgError 是 pgx 错误类型的最小接口（同 be-sdk-go events.go / 其余组件
-// 的既有判据）：带 SQLSTATE 的错误都能用 errors.As 接住。
+// pgError 是 pgx 错误类型的最小接口：带 SQLSTATE 的错误都能用 errors.As
+// 接住，不用 import pgconn。
 type pgError interface{ SQLState() string }
 
 func isUniqueViolation(err error) bool {

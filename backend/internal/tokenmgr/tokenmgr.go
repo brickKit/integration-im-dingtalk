@@ -1,6 +1,6 @@
-// Package tokenmgr 管理钉钉 access_token 的缓存与刷新——被 consumer
-// （发消息前要拿一个有效 token）与 service（GetChannelHealth/管理员手动
-// 刷新）两边共用，避免同一套"缓存够不够新、要不要刷新"的判断写两遍。
+// Package tokenmgr 管理钉钉 access_token 的缓存与刷新，consumer（发消息前
+// 要一个有效 token）与 service（GetChannelHealth、管理员手动刷新）共用，
+// "缓存够不够新、要不要刷新"只写这一份。
 package tokenmgr
 
 import (
@@ -36,14 +36,13 @@ func isValid(t repo.Token) bool {
 	return t.AccessToken != "" && time.Now().Before(t.ExpiresAt.Add(-expiryBuffer))
 }
 
-// EnsureValid 返回一个可用的 access_token：缓存没过期（留了
-// expiryBuffer 余量）就直接用缓存，否则真的调钉钉刷新一次并落库。
+// EnsureValid 返回一个可用的 access_token：缓存没过期（留了 expiryBuffer
+// 余量）就直接用缓存，否则调钉钉刷新一次并落库。
 //
-// ⚠️ 并发去重（single-flight）只属于这个函数，不属于 Refresh——Refresh
-// 的契约是"无条件真的调一次钉钉"（应急强制刷新的语义），如果 Refresh
-// 自己也在拿到锁后"发现缓存还没过期就跳过调用"，会让"强制刷新"变成
-// 有时候不刷新，这是写第一版时发现的真实语义错误：管理员点了
-// POST /admin/token/refresh 却因为缓存恰好没过期，实际什么都没做。
+// ⚠️ "拿到锁后再看一次缓存"的并发去重只属于这个函数，不属于 Refresh。
+// Refresh 的语义是"无条件真的调一次钉钉"（应急强制刷新）：它要是也在拿到锁
+// 后发现缓存没过期就跳过，管理员点了 POST /admin/token/refresh 却什么都
+// 没发生。
 func (m *Manager) EnsureValid(ctx context.Context) (string, error) {
 	cached, err := m.repo.GetToken(ctx)
 	if err != nil {
@@ -55,10 +54,8 @@ func (m *Manager) EnsureValid(ctx context.Context) (string, error) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	// 拿到锁之后再读一次缓存——如果刚才等锁的这段时间里，另一个 goroutine
-	// 已经刷新过了，直接用它的结果，不重复调钉钉（省得并发消息各刷新
-	// 一次撞频控，见 mu 字段注释）。这个"重新检查"只在这里做，Refresh
-	// 本身永远不做。
+	// 拿到锁之后再读一次缓存：等锁的这段时间里别的 goroutine 可能已经刷新
+	// 过了，直接用它的结果，不重复调钉钉。
 	cached, err = m.repo.GetToken(ctx)
 	if err != nil {
 		return "", fmt.Errorf("读 token 缓存: %w", err)
@@ -69,9 +66,9 @@ func (m *Manager) EnsureValid(ctx context.Context) (string, error) {
 	return m.doRefresh(ctx)
 }
 
-// Refresh 无条件调钉钉重新申请一次 token 并落库，不管缓存是否还有效
-// ——供 POST /admin/token/refresh（应急强制刷新）与"access_token 过期，
-// 我先自己刷一次再报"那条分工（设计计划 §4.1）直接调用。
+// Refresh 无条件调钉钉重新申请一次 token 并落库，不管缓存是否还有效。
+// 调用方：POST /admin/token/refresh（应急强制刷新），以及钉钉说
+// access_token 过期时"先自己刷新一次再重试"的那几处。
 func (m *Manager) Refresh(ctx context.Context) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

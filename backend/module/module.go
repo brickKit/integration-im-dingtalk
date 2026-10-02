@@ -1,7 +1,7 @@
-// Package module 是 integration-im-dingtalk 唯一的装配入口（全局约束
-// §K、设计书 §12.5.1、§13.3 铁律七）。单跑与合并走同一个 New 函数；
-// 模块只交回零件，谁去 Listen、谁开池、谁 init OTel、谁装信号处理器，
-// 全归调用方。
+// Package module 是 integration-im-dingtalk 唯一的装配入口。独立运行
+// （cmd/server 的 besdk.RunStandalone）与进外壳走同一个 New：模块只交回零件
+// （HTTP handler、gRPC 注册函数、后台循环），谁去 Listen、谁开连接池、谁初始化
+// OTel 与信号处理，全归调用方——同一份代码进外壳之后不会与别的成员互相覆盖。
 package module
 
 import (
@@ -25,16 +25,18 @@ import (
 	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/tokenmgr"
 )
 
-// confirmInitialDelay：延迟回查 getsendresult 前先等这么久（设计计划
-// §4.2 第②步："隔几秒查一次"）。不做成 configSchema 项——这是内部实现
-// 细节，不是装配期该关心的旋钮（同 SOP-P 判据：没有已知需求支撑的可
-// 配置是提前抽象）。
+// confirmInitialDelay：钉钉受理后，第一次回查 getsendresult 前先等这么久。
+// 不做成配置项：这是内部实现细节，没有部署方需要调它。
 const confirmInitialDelay = 5 * time.Second
 
-// New 构造 integration-im-dingtalk 模块。签名一个字都不许改（§12.5.1）。
+// New 构造 integration-im-dingtalk 模块。签名是外壳与 RunStandalone 共同依赖
+// 的约定，不改。
 func New(ctx context.Context, rt *besdk.Runtime) (*besdk.Module, error) {
-	// ⚠️ 配置只从 rt.Config 来，模块里零 os.Getenv（§12.5.3、决策 110）。
+	// 配置只从 rt.Config 读，模块里不碰 os.Getenv：一个进程只有一份环境，
+	// 进外壳后各成员的 PG_SCHEMA 会互相覆盖，不报错。
 	schema := rt.Config.StringOr("PG_SCHEMA", "integration_im_dingtalk")
+	// role 是每个事务里 SET LOCAL ROLE 的目标：独立运行时它就是登录角色；
+	// 进外壳后外壳以自己的角色登录，靠这一步切到本组件的角色。
 	role := schema + "_rw"
 
 	dt, err := readDingtalkConfig(rt.Config)
@@ -42,22 +44,22 @@ func New(ctx context.Context, rt *besdk.Runtime) (*besdk.Module, error) {
 		return nil, err
 	}
 
-	// ⚠️ 池从 rt.DB 来，不许自己 sql.Open（§13.3 铁律二）。
+	// 连接池、日志都从 rt 来，不自己 sql.Open：进外壳后全体成员共用外壳的池。
 	r := repo.New(rt.DB, role, schema)
 	client := dingtalk.NewClient(dt.baseURL, dt.appKey, dt.appSecret)
 	tm := tokenmgr.New(r, client)
 	svc := service.New(r, tm, rt.Logger)
 
-	// HTTP：engine 必须用 besdk.NewGinEngine，它已挂好 OTel / request-id /
-	// error→status / PII 脱敏日志 / RED 指标 / /healthz / /metrics。
+	// engine 必须用 besdk.NewGinEngine：它挂好了 OTel、request-id、错误到状态码
+	// 的映射、脱敏访问日志、RED 指标、/healthz 与 /metrics；gin.New() 会把这些
+	// 全部悄悄丢掉。
 	eng := besdk.NewGinEngine(rt)
 	httpapi.RegisterRoutes(eng, svc)
 
 	return &besdk.Module{
 		HTTPHandler: eng,
 
-		// ⚠️ gRPC 一个不省，而且由调用方在 extraPorts["grpc"] 上 Listen
-		// （§1.5 原则一）。
+		// gRPC 由调用方在 extraPorts["grpc"] 上 Listen，模块只注册服务。
 		RegisterGRPC: func(gs *grpc.Server) {
 			imv1.RegisterImChannelServiceServer(gs, grpcapi.New(svc))
 		},
@@ -77,7 +79,7 @@ func New(ctx context.Context, rt *besdk.Runtime) (*besdk.Module, error) {
 			case <-ctx.Done():
 				return nil
 			case err := <-errCh:
-				return err // ⚠️ 返回 error，不许 log.Fatal：一个模块退进程 = 整组组件一起没了
+				return err // 返回 error，不 log.Fatal：进外壳后一个成员退进程，同壳成员一起下线
 			}
 		},
 		Stop: func(ctx context.Context) error { return nil }, // 后台循环靠 ctx 退出

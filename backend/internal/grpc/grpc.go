@@ -1,6 +1,6 @@
-// Package grpc 实现 integration.im.v1.ImChannelService——族级 gRPC 契约
-// （设计计划 §3：包名是族级 integration.im，五个 channel:im 适配器实现
-// 同一份 proto）。
+// Package grpc 实现 integration.im.v1.ImChannelService。包名是族级的
+// integration.im：channel:im 族的每个适配器实现同一份 proto，调用方换通道
+// 不用改 import。
 package grpc
 
 import (

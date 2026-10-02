@@ -8,15 +8,14 @@ import (
 	besdk "github.com/brickKit/be-sdk-go"
 )
 
-// Token 是 dingtalk_token 单行表的内容（设计计划 §2：落库而不是只放
-// 内存，重启后重新申请会撞钉钉的频控）。
+// Token 是 dingtalk_token 单行表的内容。落库而不是只放内存：重启后重新
+// 申请会撞钉钉 gettoken 的频控。
 type Token struct {
 	AccessToken string
 	ExpiresAt   time.Time // 零值表示从未成功获取过
 }
 
-// GetToken 读当前缓存的 token（可能已过期，调用方自己判断——本层只管
-// "读出来"，"该不该刷新"是 service/dingtalk 客户端的职责）。
+// GetToken 读当前缓存的 token（可能已过期；该不该刷新由 tokenmgr 判断）。
 func (r *Repo) GetToken(ctx context.Context) (Token, error) {
 	var t Token
 	var expiresAt sql.NullTime

@@ -1,15 +1,11 @@
-// Package dingtalk 是钉钉开放平台 API 的最小客户端——只封装本组件需要
-// 的四个接口（获取 access_token、手机号查 userid、发工作通知、查发送
-// 结果）。⚠️ 这里不含任何"该不该发"、"发给谁"的判断——那是 consumer 包
-// 的事，本包只管"怎么调这四个 HTTP 接口"（设计计划 §6.9：适配器只调
-// 外部 API，严禁业务逻辑）。
+// Package dingtalk 是钉钉开放平台 API 的最小客户端，只封装本组件要用的四个
+// 接口：gettoken、手机号查 userid（getbymobile）、发工作通知
+// （asyncsend_v2）、查发送结果（getsendresult）。这里不含任何"该不该发、
+// 发给谁"的判断——适配器只翻译协议，业务判断归通知中心。
 //
-// ⚠️⚠️ 阶段三 Task 9 建仓库时没有可用的钉钉沙盒/测试企业——用户明确决定
-// 跳过真机验证，只做到"能编译通过、内部逻辑用 httptest 模拟钉钉的接口
-// 形状验证过"的程度（03-阶段三 Task 9 小节有完整记录）。这意味着：
-// URL 路径、参数名、JSON 字段名是按钉钉开放平台公开文档的既有形状写的，
-// 但从未打到真实的钉钉服务器验证过。等有真实测试企业凭据后需要补一次
-// 真机验证，届时这里大概率要修正字段名或错误码判断。
+// 四个接口的路径、参数名与响应字段都对照过真实钉钉的响应（用一个真实的
+// 钉钉团队应用调通过）。错误分类（classify.go）里只有个别分支见过真实
+// 响应，其余按公开文档推断，各分支的注释写明是哪种。
 package dingtalk
 
 import (
@@ -119,9 +115,8 @@ type getTokenResponse struct {
 	ExpiresIn   int64  `json:"expires_in"` // 秒
 }
 
-// FetchAccessToken 申请一个新的 access_token（钉钉开放平台
-// GET /gettoken?appkey=&appsecret=）。⚠️ 不做频率限制——那是调用方
-// （service/consumer 层的 token 缓存策略）的责任，本层只管"调这一下"。
+// FetchAccessToken 申请一个新的 access_token（GET /gettoken?appkey=&appsecret=）。
+// 不做频率限制：缓存与去重是 tokenmgr 的事，本层只管调这一下。
 func (c *Client) FetchAccessToken(ctx context.Context) (token string, expiresIn time.Duration, err error) {
 	q := url.Values{"appkey": {c.appKey}, "appsecret": {c.appSecret}}
 	var resp getTokenResponse
@@ -155,8 +150,8 @@ type asyncSendResponse struct {
 
 // SendWorkNotification 发一条文本工作通知给单个 userid（POST
 // /topapi/message/corpconversation/asyncsend_v2?access_token=）。
-// ⚠️ 返回的 task_id 只代表"钉钉受理了"，不代表送达（设计计划 §4.2）——
-// 真实结果要另调 GetSendResult。
+// ⚠️ 返回的 task_id 只代表钉钉受理了，不代表送达：真实结果要另调
+// GetSendResult，所以投递分 ACCEPTED / CONFIRMED 两个阶段。
 func (c *Client) SendWorkNotification(ctx context.Context, accessToken string, agentID int64, userid, content string) (int64, error) {
 	q := url.Values{"access_token": {accessToken}}
 	body := map[string]any{
@@ -174,21 +169,15 @@ func (c *Client) SendWorkNotification(ctx context.Context, accessToken string, a
 	return resp.TaskID, nil
 }
 
-// SendResult 是 GetSendResult 针对某一个 userid 的结果（设计计划 §4.2
-// 第②步）。
+// SendResult 是 GetSendResult 针对某一个 userid 的结果。
 //
-// ⚠️ 真机验证过（2026-09-09，真实钉钉个人团队）：这里最初假设响应里有
-// 一个 "status"/"progress_in_percent" 字段（0.1 版没有沙盒时照着钉钉
-// 文档某个版本的旧描述猜的），而真实响应根本没有这两个字段，是直接把
-// 收件人分类进几个名单（`read_user_id_list`/`unread_user_id_list`/
-// `failed_user_id_list`/`invalid_user_id_list`/`forbidden_list`——
-// 后一个字段名也不是猜测的 `forbidden_user_id_list`）。原先按
-// `status >= 2` 判"是否已完成"，字段不存在时零值恒为 0，永远判不成
-// "已完成"，会一直在延迟回查的退避循环里空转到轮次耗尽——这是一个真实
-// 会导致所有投递永远停在 ACCEPTED 直到超时的 bug，靠真实响应验证才
-// 发现。现在按"这个 userid 有没有出现在任意一个名单里"判断"是否已经
-// 有结果"：出现在已读/未读名单 = 成功，出现在失败/无效/禁止名单 =
-// 失败，哪个名单都没出现 = 还在处理中。
+// ⚠️ getsendresult 的真实响应里没有 status / progress_in_percent 这类"进度"
+// 字段，而是把收件人分进几个名单：read_user_id_list、unread_user_id_list、
+// failed_user_id_list、invalid_user_id_list、forbidden_list（注意不是
+// forbidden_user_id_list）。所以"有没有结果"看这个 userid 出现在哪个名单：
+// 已读 / 未读 = 成功，失败 / 无效 / 禁止 = 失败，哪个都不在 = 还在处理。
+// 照着不存在的进度字段判"已完成"，零值恒为 0，回查永远判不成完成，已送达的
+// 消息也会一直停在 ACCEPTED 直到轮数用完。
 type SendResult struct {
 	Done    bool   // 这个 userid 有没有出现在任意一个名单里
 	Success bool   // 只有 Done=true 时有意义
