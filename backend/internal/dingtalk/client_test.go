@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -184,5 +185,34 @@ func TestGetSendResult_目标用户尚未出现在任何名单里视为未完成
 	}
 	if result.Done {
 		t.Fatal("目标 userid 没出现在任何名单里，期望 Done=false（还在处理中，继续退避重试）")
+	}
+}
+
+// 连不上钉钉时，Go 的网络错误会带上完整 URL（含 query）。gettoken 的 query
+// 里是 appsecret，其余接口是 access_token：错误会进日志、进
+// GetChannelHealth 的 last_error 返回给调用方，所以错误文本里不能有它们。
+func TestClient_网络层错误不带出appsecret与access_token(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	base := srv.URL
+	srv.Close() // 地址立刻不可连，触发网络层错误
+
+	c := NewClient(base, "ak1", "secret-should-not-leak")
+	_, _, err := c.FetchAccessToken(context.Background())
+	if err == nil {
+		t.Fatal("期望网络层错误")
+	}
+	if strings.Contains(err.Error(), "secret-should-not-leak") {
+		t.Fatalf("gettoken 的网络层错误带出了 appsecret：%v", err)
+	}
+
+	_, err = c.GetUserIDByMobile(context.Background(), "token-should-not-leak", "13800000000")
+	if err == nil {
+		t.Fatal("期望网络层错误")
+	}
+	if strings.Contains(err.Error(), "token-should-not-leak") {
+		t.Fatalf("getbymobile 的网络层错误带出了 access_token：%v", err)
+	}
+	if !strings.Contains(err.Error(), "/topapi/v2/user/getbymobile") {
+		t.Fatalf("错误里应保留接口路径便于排障，实际：%v", err)
 	}
 }

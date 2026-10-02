@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -79,7 +80,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("调用钉钉 API 失败（网络层）: %w", err)
+		return fmt.Errorf("调用钉钉 API 失败（网络层）: %w", withoutQuery(err, method, c.baseURL+path))
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
@@ -100,6 +101,17 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 		}
 	}
 	return nil
+}
+
+// withoutQuery 去掉网络层错误里的 query：Go 的 *url.Error 带完整 URL，而
+// gettoken 的 query 是 appsecret、其余接口是 access_token，这些错误会进日志
+// 和 GetChannelHealth 的 last_error。只留方法与路径，底层原因原样保留。
+func withoutQuery(err error, method, u string) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return fmt.Errorf("%s %s: %w", method, u, ue.Err)
+	}
+	return err
 }
 
 type getTokenResponse struct {
