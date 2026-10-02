@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -111,5 +112,54 @@ func TestRefresh_无条件调钉钉(t *testing.T) {
 	}
 	if atomic.LoadInt64(calls) != 1 {
 		t.Fatalf("Refresh 期望恰好调 1 次 /gettoken，实际 %d 次", atomic.LoadInt64(calls))
+	}
+}
+
+// 并发消息同时发现 token 失效时，只该有一个 goroutine 真的去调 gettoken，
+// 其余等它的结果（钉钉的 gettoken 有频控）。fake 服务器故意慢一点，把
+// "都判断失效、都去刷新"的窗口拉开。
+func TestEnsureValid_并发调用只申请一次token(t *testing.T) {
+	r := testRepo(t)
+	var calls int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		atomic.AddInt64(&calls, 1)
+		time.Sleep(100 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "errmsg": "ok", "access_token": "tok-once", "expires_in": 7200})
+	}))
+	defer srv.Close()
+
+	if err := r.SetToken(context.Background(), "", zeroTime); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(r, dingtalk.NewClient(srv.URL, "ak", "as"))
+	const n = 20
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	tokens := make(chan string, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tok, err := m.EnsureValid(context.Background())
+			errs <- err
+			tokens <- tok
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	close(tokens)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for tok := range tokens {
+		if tok != "tok-once" {
+			t.Fatalf("期望每个调用方都拿到 tok-once，实际 %q", tok)
+		}
+	}
+	if got := atomic.LoadInt64(&calls); got != 1 {
+		t.Fatalf("%d 个并发 EnsureValid 期望只调 1 次 /gettoken，实际 %d 次", n, got)
 	}
 }
