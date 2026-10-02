@@ -6,6 +6,9 @@ package module
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	besdk "github.com/brickKit/be-sdk-go"
@@ -34,17 +37,14 @@ func New(ctx context.Context, rt *besdk.Runtime) (*besdk.Module, error) {
 	schema := rt.Config.StringOr("PG_SCHEMA", "integration_im_dingtalk")
 	role := schema + "_rw"
 
-	dingtalkBaseURL := rt.Config.StringOr("DINGTALK_BASE_URL", "https://oapi.dingtalk.com")
-	appKey := rt.Config.MustString("DINGTALK_APP_KEY")
-	appSecret := rt.Config.MustString("DINGTALK_APP_SECRET")
-	agentID, ok := rt.Config.Int("DINGTALK_AGENT_ID")
-	if !ok {
-		panic("必填配置项 \"dingtalkAgentId\" 未注入或不是合法整数")
+	dt, err := readDingtalkConfig(rt.Config)
+	if err != nil {
+		return nil, err
 	}
 
 	// ⚠️ 池从 rt.DB 来，不许自己 sql.Open（§13.3 铁律二）。
 	r := repo.New(rt.DB, role, schema)
-	client := dingtalk.NewClient(dingtalkBaseURL, appKey, appSecret)
+	client := dingtalk.NewClient(dt.baseURL, dt.appKey, dt.appSecret)
 	tm := tokenmgr.New(r, client)
 	svc := service.New(r, tm, rt.Logger)
 
@@ -70,7 +70,7 @@ func New(ctx context.Context, rt *besdk.Runtime) (*besdk.Module, error) {
 			go func() { errCh <- besdk.StartOutboxPump(ctx, rt.DB, schema, rt.NATS, rt.Logger) }()
 			go func() { errCh <- partition.Start(ctx, rt.DB, role, schema, rt.Logger) }()
 			go func() {
-				errCh <- consumer.Start(ctx, rt.DB, role, schema, rt.NATS, r, client, tm, int64(agentID), confirmInitialDelay, rt.Logger)
+				errCh <- consumer.Start(ctx, rt.DB, role, schema, rt.NATS, r, client, tm, dt.agentID, confirmInitialDelay, rt.Logger)
 			}()
 
 			select {
@@ -82,4 +82,35 @@ func New(ctx context.Context, rt *besdk.Runtime) (*besdk.Module, error) {
 		},
 		Stop: func(ctx context.Context) error { return nil }, // 后台循环靠 ctx 退出
 	}, nil
+}
+
+type dingtalkConfig struct {
+	baseURL, appKey, appSecret string
+	agentID                    int64
+}
+
+// readDingtalkConfig 读钉钉应用的配置。缺键或 DINGTALK_AGENT_ID 不是整数时
+// 返回 error（一次点名全部有问题的键），不 panic：进了外壳，构造函数的
+// error 由外壳点名报出并按失败契约退出，panic 会让整个外壳带着堆栈崩掉。
+func readDingtalkConfig(cfg besdk.Config) (dingtalkConfig, error) {
+	c := dingtalkConfig{baseURL: cfg.StringOr("DINGTALK_BASE_URL", "https://oapi.dingtalk.com")}
+	var problems []string
+	var ok bool
+	if c.appKey, ok = cfg.String("DINGTALK_APP_KEY"); !ok {
+		problems = append(problems, "DINGTALK_APP_KEY 未注入")
+	}
+	if c.appSecret, ok = cfg.String("DINGTALK_APP_SECRET"); !ok {
+		problems = append(problems, "DINGTALK_APP_SECRET 未注入")
+	}
+	if raw, present := cfg.String("DINGTALK_AGENT_ID"); !present {
+		problems = append(problems, "DINGTALK_AGENT_ID 未注入")
+	} else if n, err := strconv.ParseInt(raw, 10, 64); err != nil {
+		problems = append(problems, fmt.Sprintf("DINGTALK_AGENT_ID 不是整数（%q）", raw))
+	} else {
+		c.agentID = n
+	}
+	if len(problems) > 0 {
+		return dingtalkConfig{}, fmt.Errorf("钉钉配置不完整：%s", strings.Join(problems, "；"))
+	}
+	return c, nil
 }
