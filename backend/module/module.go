@@ -62,9 +62,9 @@ func New(ctx context.Context, rt *besdk.Runtime) (*besdk.Module, error) {
 			imv1.RegisterImChannelServiceServer(gs, grpcapi.New(svc))
 		},
 
-		// 后台循环：Outbox 推送 + 周分区维护（event_outbox/event_inbox）+
-		// 月分区维护（delivery_attempts）+ 消费族级派发事件。四个循环
-		// 必须并发跑，不能顺序调用。
+		// 三个后台循环并发跑（每个都阻塞到 ctx 取消，不能顺序调用）：Outbox
+		// 推送、分区维护（outbox / inbox 的周分区与 delivery_attempts 的月
+		// 分区）、消费族级派发事件。
 		Start: func(ctx context.Context) error {
 			errCh := make(chan error, 3)
 			go func() { errCh <- besdk.StartOutboxPump(ctx, rt.DB, schema, rt.NATS, rt.Logger) }()

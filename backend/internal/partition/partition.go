@@ -1,13 +1,9 @@
-// Package partition 是 Module.Start 的后台循环之一：为 event_outbox/
-// event_inbox 自动创建未来的周分区（决策 54、§11.5.1），同
-// infra-notification/erp-inventory 的既有实现。
+// Package partition 是 Module.Start 的后台循环之一，提前建好分区表未来的
+// 分区：event_outbox / event_inbox 按周，delivery_attempts 按月
+// （monthly.go）。没提前建好的那个周期一到，写这些表的每一条 INSERT 都报
+// "no partition of relation found for row"。
 //
-// delivery_attempts 的月分区维护在 monthly.go——它和这里的周分区是两套
-// 独立的窗口逻辑（设计计划 §7：投递尝试按月，且归档窗口全系统最短，
-// 只有 1 个月）。
-//
-// dingtalk_user_map/dingtalk_token 不在这里——它们不分区（设计计划
-// §2、§7）。
+// dingtalk_user_map、dingtalk_token 不分区，不在这里。
 package partition
 
 import (
@@ -27,10 +23,18 @@ const (
 
 var weeklyPartitionedTables = []string{"event_outbox", "event_inbox"}
 
+// Start 启动时维护一次，之后每 checkInterval 一次，直到 ctx 取消。周分区与
+// 月分区各自失败、各自记日志，一边失败不耽误另一边。
 func Start(ctx context.Context, db *sql.DB, role, schema string, logger *slog.Logger) error {
-	if err := ensureAllWeekly(ctx, db, role, schema); err != nil {
-		logger.Error("周分区维护失败", "error", err)
+	maintain := func() {
+		if err := ensureAllWeekly(ctx, db, role, schema); err != nil {
+			logger.Error("周分区维护失败", "error", err)
+		}
+		if err := ensureAllMonthly(ctx, db, role, schema); err != nil {
+			logger.Error("月分区维护失败", "error", err)
+		}
 	}
+	maintain()
 
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
@@ -39,9 +43,7 @@ func Start(ctx context.Context, db *sql.DB, role, schema string, logger *slog.Lo
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := ensureAllWeekly(ctx, db, role, schema); err != nil {
-				logger.Error("周分区维护失败", "error", err)
-			}
+			maintain()
 		}
 	}
 }
@@ -75,10 +77,9 @@ func mondayOf(t time.Time) time.Time {
 	return d.AddDate(0, 0, -(weekday - 1))
 }
 
-// ensurePartition 用 to_regclass 先确认分区存不存在，不存在才建（同
-// erp-inventory partition.go 的既有判据：不能反过来"先建、报 already
-// exists 就忽略"）。name 由调用方算好传入，周/月两套格式不同（见
-// monthly.go），本函数本身与"周还是月"无关。
+// ensurePartition 先用 to_regclass 确认分区在不在，不在才建：不能反过来
+// "先建、报 already exists 再忽略"——报错会让整个事务进入 aborted 状态，
+// 同一事务里后面的分区全建不了。name 由调用方按周或月的格式算好传入。
 func ensurePartition(ctx context.Context, tx *sql.Tx, table, name string, from, to time.Time) error {
 	var exists bool
 	if err := tx.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, name).Scan(&exists); err != nil {
