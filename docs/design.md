@@ -84,12 +84,12 @@ Failures before DingTalk accepted anything (no userid, no token, `asyncsend_v2` 
 |---|---|---|
 | network error, "system busy", rate limiting | yes | temporary |
 | user does not exist / not in the organisation | no | retrying changes nothing; the phone cache row is deleted |
-| invalid AppKey / AppSecret | no | a configuration error; retrying only floods the log, operators must see it |
+| invalid AppKey / AppSecret (errcode 40096) | no | a configuration error; retrying only floods the log, operators must see it |
 | app lacks a permission (errcode 88) | no | someone must grant it in the developer console |
 | `access_token` expired | — | the adapter refreshes the token and retries once itself, without spending the notification centre's retries |
 | anything not recognised | yes | the retry limit is the notification centre's |
 
-Errors are matched by keywords in `errmsg`, not by `errcode`. Only the permission case has been seen in a real response; the other branches follow DingTalk's public documentation.
+Errors are matched by keywords in `errmsg`, case-insensitively, not by `errcode`. Two cases have been seen in real responses: invalid credentials (`不合法的appKey或appSecret`) and the missing permission; the other branches follow DingTalk's public documentation.
 
 ## Dependencies
 

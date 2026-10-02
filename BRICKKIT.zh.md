@@ -24,7 +24,7 @@
 - **NATS** 在 `NATS_URL` 可达：派发事件经 NATS 核心订阅进来（组件停着时发布的消息事后不会补投）；结果经 outbox 表与后台推送发出，NATS 不可达时在 outbox 里等着。
 - **一个钉钉企业内部应用**，有 AppKey、AppSecret、AgentId，并开通"通过手机号获取用户"（`qyapi_get_member_by_mobile`）与发送工作通知的权限。没开通前一项时，凡是手机号还没缓存过的投递都失败、不可重试，错误码 `DINGTALK_88`。
 - **出网 HTTPS**：组件所在的地方要能访问 `DINGTALK_BASE_URL`（默认 `https://oapi.dingtalk.com`）。完全不能出网的环境不该装本组件（`channel:im` 成员本来就可装可不装），而不是装上去让每次投递都失败。
-- 没有真实钉钉值时（本地或测试环境）组件照常启动、正常运行；每次投递在向钉钉申请 token 时失败，记成一条 `CONFIRMED` 失败并照样发出结果事件。不会崩溃；本组件自己不重试任何东西（要不要重试由通知中心看 `retryable` 决定）。
+- 没有真实钉钉值时（本地或测试环境）组件照常启动、正常运行；每次投递在向钉钉申请 token 时失败，记成一条 `CONFIRMED` 失败（不可重试，`DINGTALK_40096`：AppKey 或 AppSecret 不合法）并照样发出结果事件。不会崩溃；本组件自己不重试任何东西（要不要重试由通知中心看 `retryable` 决定）。
 - **授权**（`infra/authz`）与**身份**（`infra/iam-casdoor`，或任何提供 JWKS 的 IAM）在 `AUTHZ_BUNDLE_URL`、`IAM_JWKS_URL` 可达，两个管理用 REST 路由才不只是返回错误。它们是配置，不是依赖：没有它们组件照样启动。
 
 ## 依赖说明

@@ -53,6 +53,22 @@ func TestClassifyError_AppSecret无效不可重试(t *testing.T) {
 	}
 }
 
+// 真实钉钉对不合法凭据的 gettoken 原始响应（用假的 appkey / appsecret 实测）：
+// {"errcode":40096,"errmsg":"不合法的appKey或appSecret"}。注意大小写是 appKey /
+// appSecret：凭据配错了重试也不会好，必须判不可重试，让运维看见。
+func TestClassifyError_真实响应_appKey或appSecret不合法不可重试(t *testing.T) {
+	retryable, code, evict := ClassifyError(&APIError{Code: 40096, Msg: "不合法的appKey或appSecret"})
+	if retryable {
+		t.Fatal("凭据不合法期望不可重试——这是钉钉对假凭据的真实响应")
+	}
+	if evict {
+		t.Fatal("凭据问题不该清用户缓存")
+	}
+	if code != "DINGTALK_40096" {
+		t.Fatalf("期望 error_code=DINGTALK_40096，实际 %q", code)
+	}
+}
+
 func TestClassifyError_网络错误可重试(t *testing.T) {
 	retryable, code, _ := ClassifyError(errors.New("dial tcp: connection refused"))
 	if !retryable {

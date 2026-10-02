@@ -10,10 +10,11 @@ import (
 // 钉钉特有的）；要不要真的重试、隔多久、重试几次归通知中心。两边都判会
 // 互相打架，都不判就会给离职员工重试好几次。
 //
-// ⚠️ 判据按 errmsg 的关键词匹配，不按 errcode 数字。见过真实响应的只有
-// "应用未开通所需权限"一类（errcode=88，sub_msg 形如"应用尚未开通所需的
-// 权限：[qyapi_get_member_by_mobile]…"）：这类错误要人去开发者后台开通
-// 权限，重试不会自愈，判不可重试。其余分支按公开文档推断。
+// ⚠️ 判据按 errmsg 的关键词匹配（不分大小写），不按 errcode 数字。见过真实
+// 响应的有两类，都判不可重试：凭据不合法（errcode=40096，"不合法的appKey或
+// appSecret"）；应用未开通所需权限（errcode=88，sub_msg 形如"应用尚未开通所需
+// 的权限：[qyapi_get_member_by_mobile]…"，要人去开发者后台开通，重试不会
+// 自愈）。其余分支按公开文档推断。
 //
 // evictUserCache=true 时调用方要删掉 dingtalk_user_map 里这个手机号的缓存
 // 行（缓存的过期策略）。
@@ -30,9 +31,11 @@ func ClassifyError(err error) (retryable bool, errorCode string, evictUserCache 
 		// 这个人在钉钉那边找不到，重试多少次都一样；同时清掉缓存的 userid
 		// 映射，人换了手机号或重新入职后能重新解析。（推断）
 		return false, apiErrorCode(apiErr), true
-	case containsAny(msg, "AppKey", "AppSecret", "appkey", "appsecret", "无效的access_token", "access_token不合法"):
-		// 配置错了，重试只会刷屏，要让运维看见。access_token 过期不走到这里：
-		// consumer 先识别它（IsTokenExpired）、自己刷新后重试一次。（推断）
+	case containsAny(msg, "appkey", "appsecret", "无效的access_token", "access_token不合法"):
+		// 配置错了，重试只会刷屏，要让运维看见。凭据不合法见过真实响应
+		// （errcode=40096，"不合法的appKey或appSecret"）；access_token 那两条是
+		// 推断。access_token 过期不走到这里：consumer 先识别它（IsTokenExpired）、
+		// 自己刷新后重试一次。
 		return false, apiErrorCode(apiErr), false
 	case containsAny(msg, "未开通所需的权限", "尚未开通", "无权限", "no privilege", "forbidden"):
 		// 见过真实响应（errcode=88，见本函数顶部注释）：应用没开通需要的
@@ -50,9 +53,12 @@ func apiErrorCode(e *APIError) string {
 	return "DINGTALK_" + strconv.Itoa(e.Code)
 }
 
+// containsAny 不分大小写：钉钉 errmsg 里的英文写法并不统一（真实响应写的是
+// "appKey" / "appSecret"），按字面大小写匹配会让凭据错误漏进可重试的默认分支。
 func containsAny(s string, substrs ...string) bool {
+	s = strings.ToLower(s)
 	for _, sub := range substrs {
-		if strings.Contains(s, sub) {
+		if strings.Contains(s, strings.ToLower(sub)) {
 			return true
 		}
 	}
@@ -67,5 +73,5 @@ func IsTokenExpired(err error) bool {
 		return false
 	}
 	return containsAny(apiErr.Msg, "access_token", "token不存在", "token已过期", "token expired") &&
-		!containsAny(apiErr.Msg, "AppKey", "AppSecret")
+		!containsAny(apiErr.Msg, "appkey", "appsecret")
 }
