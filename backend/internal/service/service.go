@@ -10,8 +10,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/repo"
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/tokenmgr"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/repo"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/tokenmgr"
 )
 
 type Service struct {

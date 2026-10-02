@@ -11,8 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	besdk "github.com/brickKit/be-sdk-go"
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/repo"
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/service"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/repo"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/service"
 )
 
 func RegisterRoutes(eng *gin.Engine, svc *service.Service) {

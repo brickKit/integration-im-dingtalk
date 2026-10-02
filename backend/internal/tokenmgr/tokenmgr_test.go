@@ -13,8 +13,8 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/dingtalk"
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/repo"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/dingtalk"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/repo"
 )
 
 var zeroTime time.Time

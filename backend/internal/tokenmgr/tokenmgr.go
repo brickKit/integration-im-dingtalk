@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/dingtalk"
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/repo"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/dingtalk"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/repo"
 )
 
 // expiryBuffer：提前这么久就当作"快过期了"，主动刷新而不是等真正过期

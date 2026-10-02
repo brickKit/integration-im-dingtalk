@@ -18,9 +18,9 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/nats-io/nats.go"
 
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/dingtalk"
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/repo"
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/tokenmgr"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/dingtalk"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/repo"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/tokenmgr"
 )
 
 const (

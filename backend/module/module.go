@@ -12,15 +12,14 @@ import (
 	imv1 "github.com/brickKit/integration-im-dingtalk/gen/integration/im/v1"
 	"google.golang.org/grpc"
 
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/consumer"
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/dingtalk"
-	grpcapi "github.com/brickKit/integration-im-dingtalk/backend/internal/grpc"
-	httpapi "github.com/brickKit/integration-im-dingtalk/backend/internal/http"
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/partition"
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/repo"
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/service"
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/tokenmgr"
-	"github.com/brickKit/integration-im-dingtalk/migrations"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/consumer"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/dingtalk"
+	grpcapi "github.com/brickKit/integration-im-dingtalk/v2/backend/internal/grpc"
+	httpapi "github.com/brickKit/integration-im-dingtalk/v2/backend/internal/http"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/partition"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/repo"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/service"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/tokenmgr"
 )
 
 // confirmInitialDelay：延迟回查 getsendresult 前先等这么久（设计计划
@@ -32,13 +31,13 @@ const confirmInitialDelay = 5 * time.Second
 // New 构造 integration-im-dingtalk 模块。签名一个字都不许改（§12.5.1）。
 func New(ctx context.Context, rt *besdk.Runtime) (*besdk.Module, error) {
 	// ⚠️ 配置只从 rt.Config 来，模块里零 os.Getenv（§12.5.3、决策 110）。
-	schema := rt.Config.StringOr("pgSchema", "integration_im_dingtalk")
+	schema := rt.Config.StringOr("PG_SCHEMA", "integration_im_dingtalk")
 	role := schema + "_rw"
 
-	dingtalkBaseURL := rt.Config.StringOr("dingtalkBaseUrl", "https://oapi.dingtalk.com")
-	appKey := rt.Config.MustString("dingtalkAppKey")
-	appSecret := rt.Config.MustString("dingtalkAppSecret")
-	agentID, ok := rt.Config.Int("dingtalkAgentId")
+	dingtalkBaseURL := rt.Config.StringOr("DINGTALK_BASE_URL", "https://oapi.dingtalk.com")
+	appKey := rt.Config.MustString("DINGTALK_APP_KEY")
+	appSecret := rt.Config.MustString("DINGTALK_APP_SECRET")
+	agentID, ok := rt.Config.Int("DINGTALK_AGENT_ID")
 	if !ok {
 		panic("必填配置项 \"dingtalkAgentId\" 未注入或不是合法整数")
 	}
@@ -62,8 +61,6 @@ func New(ctx context.Context, rt *besdk.Runtime) (*besdk.Module, error) {
 		RegisterGRPC: func(gs *grpc.Server) {
 			imv1.RegisterImChannelServiceServer(gs, grpcapi.New(svc))
 		},
-
-		Migrations: migrations.FS, // 合并态由外壳按拓扑顺序跑（§13.3 铁律五）
 
 		// 后台循环：Outbox 推送 + 周分区维护（event_outbox/event_inbox）+
 		// 月分区维护（delivery_attempts）+ 消费族级派发事件。四个循环

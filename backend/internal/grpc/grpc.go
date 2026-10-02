@@ -10,8 +10,8 @@ import (
 
 	imv1 "github.com/brickKit/integration-im-dingtalk/gen/integration/im/v1"
 
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/repo"
-	"github.com/brickKit/integration-im-dingtalk/backend/internal/service"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/repo"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/service"
 )
 
 type server struct {
