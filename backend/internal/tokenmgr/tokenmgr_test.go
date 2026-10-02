@@ -16,6 +16,7 @@ import (
 
 	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/dingtalk"
 	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/repo"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/testlock"
 )
 
 var zeroTime time.Time
@@ -33,6 +34,7 @@ func testRepo(t *testing.T) *repo.Repo {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
+	testlock.TokenRow(t, db)
 	return repo.New(db, "integration_im_dingtalk_rw", "integration_im_dingtalk")
 }
 

@@ -4,10 +4,14 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/testlock"
 )
 
 func TestToken_读写单行(t *testing.T) {
-	r := testRepo(t)
+	db := testDB(t)
+	testlock.TokenRow(t, db)
+	r := New(db, "integration_im_dingtalk_rw", "integration_im_dingtalk")
 	ctx := context.Background()
 
 	// 迁移已经 INSERT 了 id=1 那一行（空 access_token），先确认初始态。

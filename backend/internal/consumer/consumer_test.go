@@ -20,6 +20,7 @@ import (
 
 	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/dingtalk"
 	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/repo"
+	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/testlock"
 	"github.com/brickKit/integration-im-dingtalk/v2/backend/internal/tokenmgr"
 )
 
@@ -39,6 +40,7 @@ func testDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
+	testlock.TokenRow(t, db)
 	return db
 }
 
