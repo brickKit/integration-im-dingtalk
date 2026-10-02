@@ -67,6 +67,13 @@ func testSubject(base string) string {
 	return fmt.Sprintf("test.%s.%d", base, time.Now().UnixNano())
 }
 
+// uniquePhone 每次运行给一个新手机号。手机号是 dingtalk_user_map 的主键：
+// 用固定号码时，第一次运行之后缓存里就有它，后面每次运行都命中缓存，
+// "缓存没有 → 调 getbymobile → 写缓存"这条路径再也不跑，测试照样绿。
+func uniquePhone() string {
+	return fmt.Sprintf("138%08d", time.Now().UnixNano()%100000000)
+}
+
 func publishEvent(t *testing.T, nc *nats.Conn, subject, aggregateID string, version int64, payload string) {
 	t.Helper()
 	msg := &nats.Msg{Subject: subject, Data: []byte(payload), Header: nats.Header{}}
@@ -183,7 +190,7 @@ func TestDispatchHandler_target_adapters不含dingtalk时直接丢弃(t *testing
 	subj := testSubject("infra.notification.dispatch.im.v1")
 	runConsumeFor(t, db, nc, subj, handler, 300*time.Millisecond, func(nc *nats.Conn) {
 		publishEvent(t, nc, subj, recordID, 1,
-			dispatchPayloadJSON(recordID, 1, []string{"wecom"}, "13800000000"))
+			dispatchPayloadJSON(recordID, 1, []string{"wecom"}, uniquePhone()))
 	})
 
 	if outboxCount(t, db, "integration.im.result.v1", recordID) != 0 {
@@ -227,7 +234,7 @@ func TestDispatchHandler_成功提交后ACCEPTED_延迟回查后CONFIRMED(t *tes
 	// 要盖过这段时间。
 	runConsumeFor(t, db, nc, subj, handler, 1200*time.Millisecond, func(nc *nats.Conn) {
 		publishEvent(t, nc, subj, recordID, 1,
-			dispatchPayloadJSON(recordID, 1, []string{"dingtalk"}, "13800000000"))
+			dispatchPayloadJSON(recordID, 1, []string{"dingtalk"}, uniquePhone()))
 	})
 
 	statuses, err := r.BatchGetLatestStatus(context.Background(), []string{recordID})
