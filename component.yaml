@@ -4,7 +4,7 @@ kind: Component
 metadata:
   id: integration/im-dingtalk
   name: DingTalk channel
-  version: 3.0.3
+  version: 3.0.4
   description: "The DingTalk channel member (protocol 10, be-protocol chapter 20): the notification component's deliveries sent as interactive cards through external commands, DingTalk's signed callbacks turned into action events on its own stream (the owners take them), the principals' own DingTalk bindings; it never calls an owner"
   repository: https://github.com/brickKit/integration-im-dingtalk
 
