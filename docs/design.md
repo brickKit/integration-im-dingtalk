@@ -91,6 +91,8 @@
 
 ## 实现状态
 
+3.0.1：清单补 `release.goModule: true`（3.0.0 只打了裸标签，外壳取不到 Go 模块）；行为不变。
+
 3.0.0（装配项目阶段计划 C10 的 P5）：ID01–ID12 已实现。集成测试对真实的 PostgreSQL 与消息系统、假的钉钉（换掉客户端）；钉钉的真实接口（`internal/dingtalk` 的 `Client`）在格里由 L3 对模拟钉钉测。改坏检查 12 处：11 处变红；1 处没变红：回调重推时不登记第二个工作项这一处，工作项处理时也按回调的状态只处理一次（两道守卫）。系统面只许 `infra/notification`；本人绑定的操作单独一个资源（`integration.im_dingtalk.my_binding`），与管理员的分开（看得见一条记录按资源的查看操作判断）。 be-sdk-go alpha.132（线协议 alpha.129）。
 
 ## 部署与替换
