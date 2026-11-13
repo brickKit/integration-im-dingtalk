@@ -128,23 +128,35 @@ func (c *Client) UserOfCode(ctx context.Context, code string) (string, error) {
 		Headers: map[string]string{"x-acs-dingtalk-access-token": tok.AccessToken}}, &me); err != nil || me.UnionID == "" {
 		return "", errs.New(errs.ReasonDependencyUnavailable, "DingTalk did not answer who the user is")
 	}
-	app, err := c.accessToken(ctx)
-	if err != nil {
-		return "", err
+	for attempt := 0; ; attempt++ {
+		app, err := c.accessToken(ctx)
+		if err != nil {
+			return "", err
+		}
+		var u struct {
+			ErrCode int `json:"errcode"`
+			Result  struct {
+				UserID string `json:"userid"`
+			} `json:"result"`
+		}
+		if err := c.OAPI.Do(ctx, calls.Request{Method: "POST", Path: "/topapi/user/getbyunionid?" +
+			url.Values{"access_token": {app}}.Encode(), Body: map[string]string{"unionid": me.UnionID}, Idempotent: true},
+			&u); err != nil {
+			return "", errs.New(errs.ReasonDependencyUnavailable, "DingTalk did not answer the user of a union id")
+		}
+		if tokenRefused(u.ErrCode) && attempt == 0 { // invalidated before it expired: fetched again, once (ID05)
+			c.forget()
+			continue
+		}
+		if u.ErrCode != 0 || u.Result.UserID == "" {
+			return "", errs.New(errs.ReasonRequestInvalid, "the DingTalk user is not in the organisation")
+		}
+		return u.Result.UserID, nil
 	}
-	var u struct {
-		ErrCode int `json:"errcode"`
-		Result  struct {
-			UserID string `json:"userid"`
-		} `json:"result"`
-	}
-	if err := c.OAPI.Do(ctx, calls.Request{Method: "POST", Path: "/topapi/user/getbyunionid?" +
-		url.Values{"access_token": {app}}.Encode(), Body: map[string]string{"unionid": me.UnionID}, Idempotent: true}, &u); err != nil ||
-		u.ErrCode != 0 || u.Result.UserID == "" {
-		return "", errs.New(errs.ReasonRequestInvalid, "the DingTalk user is not in the organisation")
-	}
-	return u.Result.UserID, nil
 }
+
+// tokenRefused is the old API's answer to an application token it no longer takes: invalid (40014) or expired (42001).
+func tokenRefused(code int) bool { return code == 40014 || code == 42001 }
 
 // ConsentURL is DingTalk's consent page for a binding's state (ID10).
 func (c *Client) ConsentURL(state string) string {

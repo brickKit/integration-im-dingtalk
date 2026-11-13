@@ -52,7 +52,12 @@ func main() {
 	}, accounts)
 	check(err)
 	for _, u := range append([]string{user}, users...) {
-		check(seed.NewClient(base, accounts[u].Token).WaitGranted("GET", "/api/im-dingtalk/bindings/me", time.Minute))
+		// a read: answered 200 once the grant has reached the component (WaitGranted is for writes, a 400 on the body)
+		code, out, err := seed.NewClient(base, accounts[u].Token).UntilGranted(time.Minute, "GET", "/api/im-dingtalk/bindings/me", nil)
+		check(err)
+		if code != 200 {
+			fail("%s: GET /api/im-dingtalk/bindings/me answers %d %v", u, code, out)
+		}
 	}
 	fmt.Printf("seed integration/im-dingtalk: binding granted to %d accounts, maintenance to %s\n", len(users)+1, user)
 }
