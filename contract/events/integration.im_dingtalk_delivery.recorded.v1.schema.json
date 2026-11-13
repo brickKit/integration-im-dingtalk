@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brickkit.dev/be-protocol/schemas/channel/delivery.v1.schema.json",
+  "title": "be.channel.delivery.v1",
+  "description": "A channel member's delivery result (be-protocol chapter 20, P20.2), published on its own stream as <domain>.<component>_delivery.recorded.v1 when the delivery's external command ends. sent is as far as the channel can confirm: not delivered.",
+  "type": "object",
+  "required": [
+    "delivery_id",
+    "caller",
+    "sender",
+    "intent_id",
+    "principal",
+    "result"
+  ],
+  "properties": {
+    "delivery_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "caller": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$"
+    },
+    "sender": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$"
+    },
+    "intent_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "principal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "result": {
+      "enum": [
+        "sent",
+        "failed",
+        "rejected",
+        "expired"
+      ]
+    }
+  }
+}

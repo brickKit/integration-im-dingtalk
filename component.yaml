@@ -1,0 +1,216 @@
+apiVersion: brickkit/v1
+kind: Component
+
+metadata:
+  id: integration/im-dingtalk
+  name: DingTalk channel
+  version: 3.0.0
+  description: "The DingTalk channel member (protocol 10, be-protocol chapter 20): the notification component's deliveries sent as interactive cards through external commands, DingTalk's signed callbacks turned into action events on its own stream (the owners take them), the principals' own DingTalk bindings; it never calls an owner"
+  repository: https://github.com/brickKit/integration-im-dingtalk
+
+events:
+  publishes:
+    - integration.im_dingtalk_action.recorded.v1
+    - integration.im_dingtalk_delivery.recorded.v1
+
+deployment:
+  type: container
+  build:
+    context: .
+    dockerfile: Dockerfile
+  port: 8207
+  extraPorts:
+    - name: grpc
+      port: 9207
+      protocol: grpc
+
+healthCheck:
+  type: http
+  path: /healthz
+
+readinessCheck:
+  type: http
+  path: /readyz
+
+migration:
+  command: ["/integration-im-dingtalk", "migrate"]
+
+local:
+  runCommand: [go, run, .]
+  migrationCommand: [go, run, ., migrate]
+
+configSchema:
+  properties:
+    AUDIT_GRPC_URL:
+      description: 'process-level: the same for every member of a shell'
+      type: string
+    AUTHZ_GRPC_URL:
+      description: 'process-level: the same for every member of a shell'
+      type: string
+    BUS_URL:
+      description: 'process-level: the same for every member of a shell'
+      secret: true
+      type: string
+    DEPLOYMENT_ID:
+      description: 'process-level: the same for every member of a shell'
+      type: string
+    DINGTALK_API_URL:
+      description: 'DingTalk''s API (cards, OAuth): the simulator''s address in a cell; SDK default https://api.dingtalk.com'
+      type: string
+    DINGTALK_APP_KEY:
+      description: the DingTalk application's key (AppKey); also the callbacks' application id
+      type: string
+    DINGTALK_APP_SECRET:
+      description: the DingTalk application's secret
+      secret: true
+      type: string
+    DINGTALK_BIND_RETURN:
+      description: where the browser goes back to after binding (a front-end page; ?dingtalk=bound, taken or failed)
+      type: string
+    DINGTALK_CALLBACK_AES_KEY:
+      description: the callbacks' encryption key (43 base64 characters)
+      secret: true
+      type: string
+    DINGTALK_CALLBACK_TOKEN:
+      description: the callbacks' signature token
+      secret: true
+      type: string
+    DINGTALK_CARD_TEMPLATE_ID:
+      description: the interactive card's template id
+      type: string
+    DINGTALK_LINK_BASE:
+      description: the front end's address the delivered links are relative to (https://erp.example.com)
+      type: string
+    DINGTALK_LOGIN_URL:
+      description: DingTalk's OAuth consent page; SDK default https://login.dingtalk.com
+      type: string
+    DINGTALK_OAPI_URL:
+      description: DingTalk's old API (the application's access token, a union id's user); SDK default https://oapi.dingtalk.com
+      type: string
+    DINGTALK_OAUTH_REDIRECT:
+      description: the public address of GET /api/im-dingtalk/bindings/callback, as DingTalk's application registers it
+      type: string
+    EXTERNAL_COMMANDS_QUERY_ONLY:
+      description: SDK default false
+      type: boolean
+    IAM_ISSUER:
+      description: 'process-level: the same for every member of a shell'
+      type: string
+    IAM_JWKS_URL:
+      description: 'process-level: the same for every member of a shell'
+      type: string
+    IMPLEMENTATION_INSTANCE:
+      type: string
+    LOG_LEVEL:
+      description: SDK default info
+      enum:
+        - debug
+        - info
+        - warn
+        - error
+      type: string
+    OBJECT_STORE_ACCESS_KEY:
+      type: string
+    OBJECT_STORE_BUCKET:
+      type: string
+    OBJECT_STORE_PREFIX:
+      type: string
+    OBJECT_STORE_REGION:
+      description: SDK default us-east-1
+      type: string
+    OBJECT_STORE_SECRET_KEY:
+      secret: true
+      type: string
+    OBJECT_STORE_URL:
+      type: string
+    OTEL_URL:
+      description: 'process-level: the same for every member of a shell'
+      type: string
+    PG_DATABASE:
+      type: string
+    PG_HOST:
+      type: string
+    PG_IDLE_IN_TX_TIMEOUT:
+      description: a duration (e.g. 2s, 500ms); SDK default 10s
+      type: string
+    PG_LOCK_TIMEOUT:
+      description: a duration (e.g. 2s, 500ms); SDK default 2s
+      type: string
+    PG_MIGRATION_HOST:
+      type: string
+    PG_MIGRATION_PORT:
+      type: integer
+    PG_OWNER_PASSWORD:
+      secret: true
+      type: string
+    PG_OWNER_USER:
+      type: string
+    PG_PASSWORD:
+      secret: true
+      type: string
+    PG_POOL_BACKGROUND:
+      description: SDK default 4
+      type: integer
+    PG_POOL_FOREGROUND:
+      description: SDK default 8
+      type: integer
+    PG_POOLER_PREPARED:
+      description: SDK default true
+      type: boolean
+    PG_PORT:
+      description: SDK default 5432
+      type: integer
+    PG_SCHEMA:
+      type: string
+    PG_STATEMENT_TIMEOUT:
+      description: a duration (e.g. 2s, 500ms); SDK default 5s
+      type: string
+    PG_USER:
+      type: string
+    RECOVERY_PHASE:
+      description: 'process-level: the same for every member of a shell'
+      enum:
+        - frozen
+        - redelivering
+        - replaying
+        - verifying
+        - read_only
+      type: string
+    SERVICE_TLS_CA_FILE:
+      description: a file path, re-read on rotation
+      mount: file
+      secret: true
+      type: string
+    SERVICE_TLS_CERT_FILE:
+      description: a file path, re-read on rotation
+      mount: file
+      secret: true
+      type: string
+    SERVICE_TLS_KEY_FILE:
+      description: a file path, re-read on rotation
+      mount: file
+      secret: true
+      type: string
+    STOP_DRAIN_DELAY:
+      description: a duration (e.g. 2s, 500ms); SDK default 2s
+      type: string
+    STOP_TIMEOUT:
+      description: a duration (e.g. 2s, 500ms); SDK default 30s
+      type: string
+  required:
+    - BUS_URL
+    - DINGTALK_APP_KEY
+    - DINGTALK_APP_SECRET
+    - DINGTALK_BIND_RETURN
+    - DINGTALK_CALLBACK_AES_KEY
+    - DINGTALK_CALLBACK_TOKEN
+    - DINGTALK_CARD_TEMPLATE_ID
+    - DINGTALK_LINK_BASE
+    - DINGTALK_OAUTH_REDIRECT
+    - IMPLEMENTATION_INSTANCE
+    - PG_DATABASE
+    - PG_HOST
+    - PG_PASSWORD
+    - PG_SCHEMA
+    - PG_USER
+  type: object

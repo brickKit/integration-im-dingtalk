@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brickkit.dev/be-protocol/schemas/channel/action.v1.schema.json",
+  "title": "be.channel.action.v1",
+  "description": "A channel member's action event (be-protocol chapter 20, P20.6), published on the channel member's own stream as <domain>.<component>_action.recorded.v1: a principal acted on an action grant of the audience (the owner component) through the channel. The grant is not a secret; the button's one-time value never leaves the channel member.",
+  "type": "object",
+  "required": [
+    "action_id",
+    "channel",
+    "audience",
+    "principal",
+    "grant_id",
+    "action",
+    "clicked_at"
+  ],
+  "properties": {
+    "action_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "channel": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$"
+    },
+    "audience": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$"
+    },
+    "principal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "grant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "action": {
+      "type": "string",
+      "pattern": "^[a-z][a-z_]{0,39}$"
+    },
+    "clicked_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+package core
+
+import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+
+	"github.com/brickKit/be-sdk-go/v3/runtime"
+)
+
+// Config is the component's configuration as read once at the start.
+type Config struct {
+	APIURL, OAPIURL, LoginURL           string
+	AppKey, CardTemplate                string
+	AppSecret, CallbackToken, AESKey    func() string // secrets: read at each use, never logged
+	LinkBase, OAuthRedirect, BindReturn string
+}
+
+// Base is what every module works with: the runtime, the configuration and the DingTalk client.
+type Base struct {
+	RT     *runtime.Runtime
+	Cfg    Config
+	Client DingTalk
+}
+
+// NewSecret is a one-time value (a button's or a binding's state) and the digest the component keeps of it.
+func NewSecret() (value, digest string) {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	value = base64.RawURLEncoding.EncodeToString(b)
+	return value, Digest(value)
+}
+
+// Digest is a one-time value's SHA-256, hex.
+func Digest(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}

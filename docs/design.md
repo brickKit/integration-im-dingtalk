@@ -60,7 +60,7 @@
 | ID07 | **回调的处理**（工作项，以回调行幂等）：<br>- 不是卡片回调的事件：`ignored`。<br>- 按 `outTrackId` 找投递，找不到：隔离。<br>- 按钉钉用户找 `active` 的绑定，没有：隔离。<br>- 绑定的主体要等于投递的收件主体，不等：隔离（卡片被转发给了别人）。<br>- 动作要在投递的动作里，随机值的摘要要等于投递记下的这个动作的摘要，不等：隔离。<br>- 都过了，发动作事件（ID08），回调 `published`。<br>- 停在 `received` 超过 5 分钟的，告警 |
 | ID08 | **动作事件**（线协议 P20.6）：在本组件的流 `integration.im_dingtalk` 上发 `integration.im_dingtalk_action.recorded.v1`（`schemas/channel/action.v1`），字段如下，经发件表，与回调的状态同一个事务：<br>- 动作身份（UUIDv7）；<br>- 渠道成员 `integration/im-dingtalk`；<br>- 受众（投递的发送方）；<br>- 主体；<br>- 动作授权的身份；<br>- 动作；<br>- 点击的时刻。<br>本组件不调用所属组件、不记录决定；所属组件核对后执行（P20.7、P20.8），被拒时它自己给用户发站内意图 |
 | ID09 | **隔离区**：<br>- 用户面 `GET /api/im-dingtalk/callbacks?state=quarantined`（操作 `integration.im_dingtalk.callback.read`），列出原因与时刻；正文里没有随机值。<br>- 进隔离区写一条告警级日志（`event=dingtalk_callback_quarantined`）。<br>- 不自动重放 |
-| ID10 | **本人绑定**（线协议 P20.9）：<br>- 发起：用户面 `POST /api/im-dingtalk/bindings/start`（操作 `integration.im_dingtalk.binding.self`，给所有用户），答钉钉授权页的地址：带 `state`（随机值，只存摘要，10 分钟）与回跳地址 `DINGTALK_OAUTH_REDIRECT`。<br>- 回跳：公开路由 `GET /api/im-dingtalk/bindings/callback?code=…&state=…`。核对 `state`（存在、未过期、未用，原子作废），用 `code` 向钉钉换取用户身份，得到钉钉用户后为 `state` 的发起主体建立绑定，然后跳回前端。这个主体已有绑定的，旧的结束；这个钉钉用户已绑定给别人的，拒绝。<br>- 本人查看与解除：`GET /api/im-dingtalk/bindings/me`、`DELETE …/me`（同一个操作）。<br>- 管理员：`GET /api/im-dingtalk/bindings`（`integration.im_dingtalk.binding.read`，游标分页）；`DELETE /api/im-dingtalk/bindings/{principal}`（`integration.im_dingtalk.binding.end`），只能结束、不能设置。<br>- 每次建立与结束都写审计 |
+| ID10 | **本人绑定**（线协议 P20.9）：<br>- 发起：用户面 `POST /api/im-dingtalk/bindings/start`（操作 `integration.im_dingtalk.my_binding.manage`，给所有用户），答钉钉授权页的地址：带 `state`（随机值，只存摘要，10 分钟）与回跳地址 `DINGTALK_OAUTH_REDIRECT`。<br>- 回跳：公开路由 `GET /api/im-dingtalk/bindings/callback?code=…&state=…`。核对 `state`（存在、未过期、未用，原子作废），用 `code` 向钉钉换取用户身份，得到钉钉用户后为 `state` 的发起主体建立绑定，然后跳回前端。这个主体已有绑定的，旧的结束；这个钉钉用户已绑定给别人的，拒绝。<br>- 本人查看与解除：`GET /api/im-dingtalk/bindings/me`、`DELETE …/me`（同一个操作）。<br>- 管理员：`GET /api/im-dingtalk/bindings`（`integration.im_dingtalk.binding.read`，游标分页）；`DELETE /api/im-dingtalk/bindings/{principal}`（`integration.im_dingtalk.binding.end`），只能结束、不能设置。<br>- 每次建立与结束都写审计 |
 | ID11 | **能力声明**（协议 10）：<br>- 按业务参考号去重：否；<br>- 查询：否；<br>- 请求的过期时刻：否；<br>- 签名回调：是（回调只有按钮点击，没有命令的终态）；<br>- 不可撤回的命令：无（重复或漏掉的通知不是业务后果） |
 | ID12 | **凭据**：<br>- 应用密钥、回调的 `token` 与 AES 密钥都是密钥引用，不写日志。<br>- 按钮随机值与 `state` 只出现在发给钉钉的消息与用户的浏览器里。<br>- 回调密钥轮换时新旧同时有效，以后做；首批一个 |
 
@@ -70,7 +70,7 @@
 | --- | --- | --- |
 | 投递 | 系统面 `be.channel.v1.ChannelService` | `integration.im_dingtalk.system.deliver`（授予通知组件） |
 | 钉钉回调、绑定的回跳 | 公开路由（签名或 `state` 验证） | — |
-| 本人绑定：发起、查看、解除 | 用户面 | `integration.im_dingtalk.binding.self` |
+| 本人绑定：发起、查看、解除 | 用户面 | `integration.im_dingtalk.my_binding.manage` |
 | 绑定的列表、结束 | 用户面 | `integration.im_dingtalk.binding.read`、`integration.im_dingtalk.binding.end` |
 | 隔离区 | 用户面 | `integration.im_dingtalk.callback.read` |
 | 整套恢复的核对、补发 | 系统面 | `integration.im_dingtalk.system.recover`、`integration.im_dingtalk.system.resend` |
@@ -91,7 +91,7 @@
 
 ## 实现状态
 
-3.0.0 开发中（装配项目阶段计划 C10）。
+3.0.0（装配项目阶段计划 C10 的 P5）：ID01–ID12 已实现。集成测试对真实的 PostgreSQL 与消息系统、假的钉钉（换掉客户端）；钉钉的真实接口（`internal/dingtalk` 的 `Client`）在格里由 L3 对模拟钉钉测。改坏检查 12 处：11 处变红；1 处没变红：回调重推时不登记第二个工作项这一处，工作项处理时也按回调的状态只处理一次（两道守卫）。系统面只许 `infra/notification`；本人绑定的操作单独一个资源（`integration.im_dingtalk.my_binding`），与管理员的分开（看得见一条记录按资源的查看操作判断）。
 
 ## 部署与替换
 

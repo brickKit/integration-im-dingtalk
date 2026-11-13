@@ -1,0 +1,140 @@
+openapi: 3.1.0
+info:
+  title: integration/im-dingtalk user surface
+  version: 3.0.0
+  description: >-
+    The DingTalk channel member (assembly protocol 10, be-protocol chapter 20). DingTalk's callbacks and the binding's
+    return are public: their own signature and state prove them. A principal binds their own DingTalk user through
+    DingTalk's OAuth; an administrator only lists and ends bindings. Errors are application/problem+json with a reason.
+paths:
+  /api/im-dingtalk/callback:
+    post:
+      operationId: callback
+      summary: DingTalk's callback (ID06); answered with the encrypted success once kept
+      parameters:
+        - {name: signature, in: query, required: true, schema: {type: string}}
+        - {name: timestamp, in: query, required: true, schema: {type: string}}
+        - {name: nonce, in: query, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [encrypt], properties: {encrypt: {type: string}}}
+      responses:
+        '200':
+          description: kept (or seen before)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [msg_signature, timeStamp, nonce, encrypt]
+                properties:
+                  msg_signature: {type: string}
+                  timeStamp: {type: string}
+                  nonce: {type: string}
+                  encrypt: {type: string}
+        '403': {description: not DingTalk's (signature, window, size or shape)}
+  /api/im-dingtalk/bindings/callback:
+    get:
+      operationId: bindingReturn
+      summary: DingTalk's redirect back after the consent (ID10); redirects to the front end with the outcome
+      parameters:
+        - {name: authCode, in: query, schema: {type: string}}
+        - {name: code, in: query, schema: {type: string}}
+        - {name: state, in: query, required: true, schema: {type: string}}
+      responses:
+        '302': {description: 'to DINGTALK_BIND_RETURN?dingtalk=bound, taken or failed'}
+  /api/im-dingtalk/bindings/start:
+    post:
+      operationId: startBinding
+      x-operation: integration.im_dingtalk.my_binding.manage
+      summary: Start binding the caller's DingTalk user (ID10); answers DingTalk's consent page
+      responses:
+        '200':
+          description: the consent page
+          content:
+            application/json:
+              schema: {type: object, required: [url], properties: {url: {type: string}}}
+  /api/im-dingtalk/bindings/me:
+    get:
+      operationId: myBinding
+      x-operation: integration.im_dingtalk.my_binding.manage
+      summary: The caller's binding
+      responses:
+        '200':
+          description: bound or not
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bound]
+                properties:
+                  bound: {type: boolean}
+                  user_id: {type: string}
+                  bound_at: {type: string, format: date-time}
+    delete:
+      operationId: unbindMine
+      x-operation: integration.im_dingtalk.my_binding.manage
+      summary: End the caller's binding
+      responses:
+        '204': {description: ended}
+        '404': {description: no binding}
+  /api/im-dingtalk/bindings:
+    get:
+      operationId: listBindings
+      x-operation: integration.im_dingtalk.binding.read
+      summary: The active bindings, by principal (an administrator)
+      parameters:
+        - {name: cursor, in: query, schema: {type: string}}
+      responses:
+        '200':
+          description: a page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bindings, next_cursor]
+                properties:
+                  bindings:
+                    type: array
+                    items:
+                      type: object
+                      required: [principal, user_id, bound_at]
+                      properties:
+                        principal: {type: string}
+                        user_id: {type: string}
+                        bound_at: {type: string, format: date-time}
+                  next_cursor: {type: string}
+  /api/im-dingtalk/bindings/{principal}:
+    delete:
+      operationId: endBinding
+      x-operation: integration.im_dingtalk.binding.end
+      summary: End a principal's binding (an administrator ends, never sets one)
+      parameters:
+        - {name: principal, in: path, required: true, schema: {type: string}}
+      responses:
+        '204': {description: ended}
+        '404': {description: no binding}
+  /api/im-dingtalk/callbacks:
+    get:
+      operationId: quarantinedCallbacks
+      x-operation: integration.im_dingtalk.callback.read
+      summary: The quarantined callbacks, the latest first (ID09)
+      responses:
+        '200':
+          description: up to 200
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [callbacks]
+                properties:
+                  callbacks:
+                    type: array
+                    items:
+                      type: object
+                      required: [event_id, reason, received_at]
+                      properties:
+                        event_id: {type: string}
+                        reason: {type: string}
+                        received_at: {type: string, format: date-time}
