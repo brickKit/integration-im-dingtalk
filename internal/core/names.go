@@ -14,8 +14,8 @@ const (
 
 // The configuration keys (docs/design.md ID03, ID05-ID07, ID10, ID12).
 const (
-	KeyAPIURL         = "DINGTALK_API_URL"   // the new API (cards, OAuth tokens, the user): default https://api.dingtalk.com
-	KeyOAPIURL        = "DINGTALK_OAPI_URL"  // the old API (access token, union id to user id): default https://oapi.dingtalk.com
+	KeyAPIURL         = "DINGTALK_API_URL"   // the new API (the application's token, cards, OAuth, the user): default https://api.dingtalk.com
+	KeyOAPIURL        = "DINGTALK_OAPI_URL"  // the old API (union id to user id): default https://oapi.dingtalk.com
 	KeyLoginURL       = "DINGTALK_LOGIN_URL" // the OAuth consent page: default https://login.dingtalk.com
 	KeyAppKey         = "DINGTALK_APP_KEY"
 	KeyAppSecret      = "DINGTALK_APP_SECRET"

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,7 +33,8 @@ type Client struct {
 
 var _ core.DingTalk = (*Client)(nil)
 
-// accessToken is the application's token, cached until five minutes before it expires (ID05).
+// accessToken is the application's token, cached until five minutes before it expires (ID05). The secret goes in the
+// request's body, never in a URL (ID12), and a failure answers without the transport's detail.
 func (c *Client) accessToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -40,18 +42,21 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 		return c.token, nil
 	}
 	var out struct {
-		ErrCode     int    `json:"errcode"`
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
+		AccessToken string `json:"accessToken"`
+		ExpireIn    int    `json:"expireIn"`
 	}
-	q := url.Values{"appkey": {c.Cfg.AppKey}, "appsecret": {c.Cfg.AppSecret()}}
-	if err := c.OAPI.Do(ctx, calls.Request{Method: "GET", Path: "/gettoken?" + q.Encode()}, &out); err != nil {
-		return "", err
-	}
-	if out.ErrCode != 0 || out.AccessToken == "" {
+	err := c.API.Do(ctx, calls.Request{Method: "POST", Path: "/v1.0/oauth2/accessToken",
+		Body: map[string]string{"appKey": c.Cfg.AppKey, "appSecret": c.Cfg.AppSecret()}}, &out)
+	var se *calls.StatusError
+	switch {
+	case errors.As(err, &se) && se.Status >= 400 && se.Status < 500:
+		return "", errs.New(errs.ReasonDependencyUnavailable, "DingTalk refused the application's credentials")
+	case err != nil:
+		return "", errs.New(errs.ReasonDependencyUnavailable, "DingTalk did not give the application's token")
+	case out.AccessToken == "":
 		return "", errs.New(errs.ReasonDependencyUnavailable, "DingTalk refused the application's credentials")
 	}
-	c.token, c.expires = out.AccessToken, time.Now().Add(time.Duration(out.ExpiresIn)*time.Second-5*time.Minute)
+	c.token, c.expires = out.AccessToken, time.Now().Add(time.Duration(out.ExpireIn)*time.Second-5*time.Minute)
 	return c.token, nil
 }
 
@@ -72,7 +77,7 @@ func (c *Client) SendCard(ctx context.Context, card core.Card) (string, string) 
 	buttons, _ := json.Marshal(card.Buttons)
 	body := map[string]any{"cardTemplateId": c.Cfg.CardTemplate, "outTrackId": card.OutTrackID,
 		"receiverUserIdList": []string{card.UserID}, "callbackRouteKey": "be",
-		"cardData": map[string]any{"cardParamMap": map[string]string{"title": card.Title, "body": card.Body,
+		"cardData": map[string]any{"cardParamMap": map[string]string{"title": PlainText(card.Title), "body": PlainText(card.Body),
 			"buttons": string(buttons)}}}
 	var out struct {
 		Success bool `json:"success"`
@@ -98,6 +103,24 @@ func (c *Client) SendCard(ctx context.Context, card core.Card) (string, string) 
 	return core.MaybeReached, "no answer"
 }
 
+// PlainText is a value as plain text in a card (ID02): every character DingTalk's card Markdown interprets is escaped
+// with a backslash, and line breaks and other control characters become spaces.
+func PlainText(v string) string {
+	var b strings.Builder
+	for _, r := range v {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			b.WriteRune(' ')
+		case strings.ContainsRune("\\`*_{}[]()<>#+-.!|~", r):
+			b.WriteRune('\\')
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // http4xx is DingTalk's error code of a refusal (never the body as it is).
 func http4xx(body []byte) string {
 	var e struct {
@@ -116,10 +139,14 @@ func (c *Client) UserOfCode(ctx context.Context, code string) (string, error) {
 	var tok struct {
 		AccessToken string `json:"accessToken"`
 	}
-	if err := c.API.Do(ctx, calls.Request{Method: "POST", Path: "/v1.0/oauth2/userAccessToken", Body: map[string]string{
-		"clientId": c.Cfg.AppKey, "clientSecret": c.Cfg.AppSecret(), "code": code, "grantType": "authorization_code"}},
-		&tok); err != nil || tok.AccessToken == "" {
+	err := c.API.Do(ctx, calls.Request{Method: "POST", Path: "/v1.0/oauth2/userAccessToken", Body: map[string]string{
+		"clientId": c.Cfg.AppKey, "clientSecret": c.Cfg.AppSecret(), "code": code, "grantType": "authorization_code"}}, &tok)
+	var se *calls.StatusError
+	switch {
+	case errors.As(err, &se) && se.Status >= 400 && se.Status < 500, err == nil && tok.AccessToken == "":
 		return "", errs.New(errs.ReasonRequestInvalid, "DingTalk did not accept the authorization")
+	case err != nil:
+		return "", errs.New(errs.ReasonDependencyUnavailable, "DingTalk did not answer the authorization")
 	}
 	var me struct {
 		UnionID string `json:"unionId"`

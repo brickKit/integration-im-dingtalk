@@ -1,10 +1,11 @@
 openapi: 3.1.0
 info:
   title: integration/im-dingtalk user surface
-  version: 3.0.0
+  version: 3.0.3
   description: >-
-    The DingTalk channel member (assembly protocol 10, be-protocol chapter 20). DingTalk's callbacks and the binding's
-    return are public: their own signature and state prove them. A principal binds their own DingTalk user through
+    The DingTalk channel member (assembly protocol 10, be-protocol chapter 20). DingTalk's callbacks are public: their
+    own signature proves them. The binding's return is signed in: only the principal who started a binding finishes
+    it. A principal binds their own DingTalk user through
     DingTalk's OAuth; an administrator only lists and ends bindings. Errors are application/problem+json with a reason.
 paths:
   /api/im-dingtalk/callback:
@@ -37,7 +38,10 @@ paths:
   /api/im-dingtalk/bindings/callback:
     get:
       operationId: bindingReturn
-      summary: DingTalk's redirect back after the consent (ID10); redirects to the front end with the outcome
+      x-operation: integration.im_dingtalk.my_binding.manage
+      summary: >-
+        DingTalk's redirect back after the consent (ID10), in the signed-in browser; a binding another principal
+        started fails; redirects to the front end with the outcome
       parameters:
         - {name: authCode, in: query, schema: {type: string}}
         - {name: code, in: query, schema: {type: string}}

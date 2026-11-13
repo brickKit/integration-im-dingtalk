@@ -20,10 +20,10 @@
 
 | 模块 | 负责 | 拥有的表 |
 | --- | --- | --- |
-| [`bindings`](internal/bindings/AGENTS.md) | 本人绑定（OAuth 的会话、回跳、换取用户）、查看与解除、管理员的列表与结束；`UserOf`、`PrincipalOf` | `binding`、`bind_session` |
-| [`deliveries`](internal/deliveries/AGENTS.md) | `Deliver`（幂等、没有绑定答 `unmapped`、写投递与对外命令）、对外命令的 `Adapter`（每次发送重新生成按钮随机值，只存摘要）、终结钩子（结果事实） | `delivery` |
-| [`callbacks`](internal/callbacks/AGENTS.md) | 回调的接收（验签、时间窗、解密、去重、存 `received` 并登记工作项、答成功）、处理（发动作事件或隔离）、隔离区、卡住的告警 | `callback` |
-| [`dingtalk`](internal/dingtalk/AGENTS.md) | 钉钉的接口（访问令牌、互动卡片、OAuth）与回调的签名与加解密 | — |
+| [`bindings`](internal/bindings/AGENTS.md) | 本人绑定（OAuth 的会话、要登录的回跳、换取用户）、查看与解除、管理员的列表与结束；`UserOf`、`PrincipalOf`；清理 | `binding`、`bind_session` |
+| [`deliveries`](internal/deliveries/AGENTS.md) | `Deliver`（先幂等后校验、没有绑定答 `unmapped`、写投递与对外命令）、对外命令的 `Adapter`（每次发送重新生成按钮随机值，只存摘要）、终结钩子（结果事实）；清理 | `delivery` |
+| [`callbacks`](internal/callbacks/AGENTS.md) | 回调的接收（验签、时间窗、解密、去重、存 `received` 并登记工作项、答成功）、处理（发动作事件或隔离）、隔离区、卡住的告警；清理 | `callback` |
+| [`dingtalk`](internal/dingtalk/AGENTS.md) | 钉钉的接口（访问令牌、互动卡片与纯文本转义、OAuth）与回调的签名与加解密 | — |
 
 共用的：[`core`](internal/core/AGENTS.md)（名字、资源与操作、配置键、`Base`、钉钉的接口 `DingTalk`、随机值与摘要、校验）。
 
@@ -52,6 +52,8 @@
 - 不要把按钮随机值或 `state` 写进日志、事件或表（只存摘要）；`SendCard` 的答复只写短的分类。
 - 不要信回调里的用户就是收件人：映射出的主体要等于投递的收件主体（转发的卡片进隔离区）。
 - 不要加让管理员设置绑定的路由：能设绑定就能以别人的身份点按钮。
+- 不要把绑定的回跳改成公开：只有登录的发起人能完成绑定（别人转来的授权链接绑不上）。
+- 不要把凭据放进钉钉接口的地址：新接口的令牌与密钥都在请求体或请求头里；旧接口地址里的短期令牌靠 SDK 不把查询串放进错误。
 
 ## 改代码前自查
 

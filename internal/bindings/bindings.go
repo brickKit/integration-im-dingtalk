@@ -62,16 +62,21 @@ func Start(m *core.Base, c *httpx.Context) error {
 	return c.JSON(200, map[string]any{"url": m.Client.ConsentURL(state)})
 }
 
-// Callback is DingTalk's redirect back with the code and the state (a public route, ID10): the state is used once,
-// the code exchanged for the DingTalk user, the binding made for the session's principal; the browser goes back to
-// the front end with the outcome.
+// Callback is DingTalk's redirect back with the code and the state (ID10): a signed-in route, so only the principal who
+// started the binding can finish it (a consent link passed to someone else binds nobody, P20.9); the state is used
+// once, the code exchanged for the DingTalk user, the binding made; the browser goes back to the front end with the
+// outcome.
 func Callback(m *core.Base, c *httpx.Context) error {
+	ctx, me, err := core.Check(c, core.OpBindSelf)
+	if err != nil {
+		return err
+	}
 	code, state := c.Query("authCode"), c.Query("state")
 	if code == "" {
 		code = c.Query("code")
 	}
 	outcome := "bound"
-	if err := bind(m, c.Ctx(), code, state); err != nil {
+	if err := bind(m, ctx, me, code, state); err != nil {
 		if errors.Is(err, errTaken) {
 			outcome = "taken"
 		} else {
@@ -82,7 +87,7 @@ func Callback(m *core.Base, c *httpx.Context) error {
 	return c.Redirect(302, m.Cfg.BindReturn+"?"+url.Values{"dingtalk": {outcome}}.Encode())
 }
 
-func bind(m *core.Base, ctx context.Context, code, state string) error {
+func bind(m *core.Base, ctx context.Context, me, code, state string) error {
 	if code == "" || state == "" {
 		return core.Invalid("state", "the code and the state are required")
 	}
@@ -90,7 +95,7 @@ func bind(m *core.Base, ctx context.Context, code, state string) error {
 	var principal string
 	if err := m.RT.DB.Tx(ctx, func(ctx context.Context, tx db.Tx) error { // the state, used once, atomically
 		return tx.QueryRow(ctx, `UPDATE bind_session SET used_at = now() WHERE digest = $1 AND used_at IS NULL
-			AND expires_at > now() RETURNING principal`, digest).Scan(&principal)
+			AND expires_at > now() AND principal = $2 RETURNING principal`, digest, me).Scan(&principal)
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return core.NotFound("binding session")
@@ -109,9 +114,15 @@ func bind(m *core.Base, ctx context.Context, code, state string) error {
 		} else if other == principal {
 			return nil // bound already
 		}
-		if _, err := tx.Exec(ctx, `UPDATE binding SET state = 'ended', ended_at = now(), ended_by = $1
-			WHERE principal = $1 AND state = 'active'`, principal); err != nil {
+		ended, err := tx.Exec(ctx, `UPDATE binding SET state = 'ended', ended_at = now(), ended_by = $1
+			WHERE principal = $1 AND state = 'active'`, principal)
+		if err != nil {
 			return err
+		}
+		if ended.RowsAffected() > 0 { // a new DingTalk user replaces the old: the end is audited too (ID10)
+			if err := change(m, ctx, tx, principal, core.OpBindSelf, "ended", principal); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO binding (id, principal, user_id, state) VALUES ($1, $2, $3, 'active')`,
 			ids.New().String(), principal, user); err != nil {
@@ -126,7 +137,7 @@ func change(m *core.Base, ctx context.Context, tx db.Tx, actor, op, what, princi
 		return nil
 	}
 	_, err := m.RT.Audit.Write(ctx, tx, audit.Record{Category: audit.BusinessChange, Operation: op, Outcome: audit.Succeeded,
-		Actor: actor, Target: audit.TargetOf(core.Bindings, principal, map[string]any{"change": what})})
+		Actor: actor, Target: audit.TargetOf(core.Bindings, principal, nil), Changes: map[string]any{"binding": what}})
 	return err
 }
 
@@ -232,4 +243,15 @@ func List(m *core.Base, c *httpx.Context) error {
 		next = out[limit-1].Principal
 	}
 	return c.JSON(200, map[string]any{"bindings": out, "next_cursor": next})
+}
+
+// Purge deletes the binding sessions a day after their expiry and the ended bindings after 400 days (the data), in
+// the daily purge's transaction.
+func Purge(ctx context.Context, tx db.Tx) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM bind_session WHERE expires_at < now() - $1::interval`, core.SessionKept.String()); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `DELETE FROM binding WHERE state = 'ended' AND ended_at < now() - $1::interval`,
+		core.EndedBindingKept.String())
+	return err
 }

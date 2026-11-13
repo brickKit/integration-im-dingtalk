@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"time"
 
 	bindings "github.com/brickKit/integration-im-dingtalk/v3/internal/bindings"
@@ -42,8 +43,8 @@ func Deliver(m *core.Base, ctx context.Context, in *channelpb.DeliverRequest) (*
 	if !ok {
 		return nil, errs.New(errs.ReasonPermissionDenied, "no calling service")
 	}
-	if err := valid(in); err != nil {
-		return nil, err
+	if !uuidForm(in.GetDeliveryId()) {
+		return nil, core.Invalid("delivery_id", "a UUID")
 	}
 	digest, err := canon.Digest("integration.im_dingtalk.delivery", 1, request(in))
 	if err != nil {
@@ -62,6 +63,9 @@ func Deliver(m *core.Base, ctx context.Context, in *channelpb.DeliverRequest) (*
 			out.Outcome = channelpb.Outcome_OUTCOME_ACCEPTED
 			return nil
 		case !errors.Is(err, pgx.ErrNoRows):
+			return err
+		}
+		if err := valid(in); err != nil { // after the idempotency: a retry past the expiry answers the first result (P20.1)
 			return err
 		}
 		user, err := bindings.UserOf(ctx, tx, in.GetPrincipal())
@@ -151,13 +155,17 @@ func valid(in *channelpb.DeliverRequest) error {
 			return core.Invalid("action", "a grant and one to five actions")
 		}
 		for _, c := range a.GetChoices() {
-			if c.GetAction() == "" || c.GetLabel() == "" || len([]rune(c.GetLabel())) > 40 {
-				return core.Invalid("action", "each action has a name and a label of at most 40 characters")
+			if !actionName.MatchString(c.GetAction()) || c.GetLabel() == "" || len([]rune(c.GetLabel())) > 40 {
+				return core.Invalid("action", "each action is named as the action event's schema says ([a-z][a-z_]{0,39}: "+
+					"no dot, which separates the button's value) with a label of at most 40 characters")
 			}
 		}
 	}
 	return nil
 }
+
+// actionName is an action's name as the action event's schema allows it (schemas/channel/action.v1).
+var actionName = regexp.MustCompile(`^[a-z][a-z_]{0,39}$`)
 
 func linkForm(l string) bool {
 	return len(l) >= 1 && len(l) <= 2000 && l[0] == '/' && (len(l) == 1 || (l[1] != '/' && l[1] != '\\'))
@@ -249,4 +257,12 @@ func Settled(m *core.Base) func(ctx context.Context, tx db.Tx, c extcmd.Command,
 		d.DeliveryID, d.Caller, d.Result = id, caller, result
 		return channel.EmitDelivery(ctx, tx, m.RT.Events, core.ID, d)
 	}
+}
+
+// Purge deletes the deliveries 7 days past their expiry and at least 90 days after they were made (the data), in the
+// daily purge's transaction.
+func Purge(ctx context.Context, tx db.Tx) error {
+	_, err := tx.Exec(ctx, `DELETE FROM delivery WHERE expires_at < now() - $1::interval AND created_at < now() - $2::interval`,
+		core.DeliveryAfter.String(), core.DeliveryAtLeast.String())
+	return err
 }

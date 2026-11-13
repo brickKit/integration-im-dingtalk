@@ -117,6 +117,7 @@ type fixture struct {
 	dave  client
 	chann channelpb.ChannelServiceClient // as infra/notification
 	other channelpb.ChannelServiceClient // as another component
+	mod   *dingtalk.Module
 }
 
 func TestDingTalkEndToEnd(t *testing.T) {
@@ -126,6 +127,7 @@ func TestDingTalkEndToEnd(t *testing.T) {
 	fx.sending()
 	fx.callbacks()
 	fx.expiry()
+	fx.purge()
 }
 
 func start(t *testing.T) *fixture {
@@ -149,7 +151,7 @@ func start(t *testing.T) *fixture {
 			Valid: sdkauthz.Window{From: "2026-01-01T00:00:00Z"}})
 	}
 	fx := &fixture{t: t, ctx: ctx, w: w, admin: admin, ding: &fakeDingTalk{codes: map[string]string{
-		"code-bob": "u-bob", "code-carol": "u-carol", "code-carol-as-bob": "u-bob"}}}
+		"code-bob": "u-bob", "code-carol": "u-carol", "code-carol-2": "u-carol-2", "code-carol-as-bob": "u-bob"}}}
 	portFree(t, itPort, itSystem)
 
 	tr, err := bus.Open(ctx, natsURL, "dingtalk-it", slog.Default())
@@ -187,6 +189,7 @@ func start(t *testing.T) *fixture {
 		m, err := newModule(rt)
 		if err == nil {
 			m.(*dingtalk.Module).UseClient(fx.ding)
+			fx.mod = m.(*dingtalk.Module)
 		}
 		return m, err
 	}

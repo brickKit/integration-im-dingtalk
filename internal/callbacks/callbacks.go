@@ -26,6 +26,7 @@ import (
 	"github.com/brickKit/be-sdk-go/v3/httpx"
 	"github.com/brickKit/be-sdk-go/v3/ids"
 	"github.com/brickKit/be-sdk-go/v3/work"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -197,8 +198,12 @@ func judge(m *core.Base, ctx context.Context, tx db.Tx, e event) (string, string
 		actions                         []deliveries.Action
 	}
 	var raw []byte
-	err := tx.QueryRow(ctx, `SELECT caller, sender, principal, user_id, grant_id::text, actions FROM delivery WHERE id::text = $1`,
-		e.OutTrackID).Scan(&d.caller, &d.sender, &d.principal, &d.user, &d.grant, &raw)
+	id, perr := uuid.Parse(e.OutTrackID)
+	if perr != nil { // not one of ours: no delivery has it
+		return "quarantined", "unknown_delivery", nil
+	}
+	err := tx.QueryRow(ctx, `SELECT caller, sender, principal, user_id, grant_id::text, actions FROM delivery WHERE id = $1`,
+		id).Scan(&d.caller, &d.sender, &d.principal, &d.user, &d.grant, &raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "quarantined", "unknown_delivery", nil
 	}
@@ -296,4 +301,12 @@ func Quarantined(m *core.Base, h *httpx.Context) error {
 		return err
 	}
 	return h.JSON(200, map[string]any{"callbacks": out})
+}
+
+// Purge deletes the processed callbacks after 180 days (the dispute period, protocol 10); one still received is kept
+// until it is processed. In the daily purge's transaction.
+func Purge(ctx context.Context, tx db.Tx) error {
+	_, err := tx.Exec(ctx, `DELETE FROM callback WHERE state <> 'received' AND received_at < now() - $1::interval`,
+		core.CallbackKept.String())
+	return err
 }

@@ -4,7 +4,7 @@ kind: Component
 metadata:
   id: integration/im-dingtalk
   name: DingTalk channel
-  version: 3.0.2
+  version: 3.0.3
   description: "The DingTalk channel member (protocol 10, be-protocol chapter 20): the notification component's deliveries sent as interactive cards through external commands, DingTalk's signed callbacks turned into action events on its own stream (the owners take them), the principals' own DingTalk bindings; it never calls an owner"
   repository: https://github.com/brickKit/integration-im-dingtalk
 
@@ -55,7 +55,7 @@ configSchema:
       description: 'process-level: the same for every member of a shell'
       type: string
     DINGTALK_API_URL:
-      description: 'DingTalk''s API (cards, OAuth): the simulator''s address in a cell; SDK default https://api.dingtalk.com'
+      description: 'DingTalk''s API (the application''s token, cards, OAuth): the simulator''s address in a cell; SDK default https://api.dingtalk.com'
       type: string
     DINGTALK_APP_KEY:
       description: the DingTalk application's key (AppKey); also the callbacks' application id
@@ -85,7 +85,7 @@ configSchema:
       description: DingTalk's OAuth consent page; SDK default https://login.dingtalk.com
       type: string
     DINGTALK_OAPI_URL:
-      description: DingTalk's old API (the application's access token, a union id's user); SDK default https://oapi.dingtalk.com
+      description: DingTalk's old API (a union id's user); SDK default https://oapi.dingtalk.com
       type: string
     DINGTALK_OAUTH_REDIRECT:
       description: the public address of GET /api/im-dingtalk/bindings/callback, as DingTalk's application registers it

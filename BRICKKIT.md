@@ -7,6 +7,12 @@
 - **按钮回调**：钉钉推来的签名、加密的回调经验证后，作为“某人对某动作授权点了某按钮”的动作事件发到本组件的流上；任务所属组件（例如采购的审批）按配置订阅、核对后执行。本组件从不调用所属组件，也不记录决定（D68）。
 - **本人绑定**：用户在系统里登录后经钉钉授权，把自己的钉钉账号绑到平台账号；管理员只能结束绑定，不能设置。
 
+**3.0.3**：
+- 绑定的回跳要在登录的浏览器里完成，只有发起绑定的人能完成（别人转来的授权链接绑不上）；部署的边缘要把会话带到这条路由。
+- 应用密钥只在请求体里发给钉钉（以前在旧接口的地址里，钉钉不可达时会随错误进日志）。
+- 每天清理过期的绑定会话、到期的投递、处理完的回调与结束的绑定（期限见设计“拥有的数据”）。
+- 卡片的标题按纯文本转义；已受理的投递过了到期再交来答第一次的结果；动作名带 `.` 被拒；换绑时旧绑定的结束也写审计。
+
 **3.0.2**：钉钉提前作废了应用的访问令牌（旧接口答 40014、42001）时，绑定丢掉缓存的令牌、重取后再试一次（以前要等缓存到期，其间绑定都失败）；取不到用户的网络故障答依赖不可用，不再说成“不在组织里”。种子等授予到位的方式改对（读的路由答 200 才算到位）。
 
 **3.0.1**：3.0.0 的清单漏了 `release.goModule: true`，只打了裸标签，外壳取不到 Go 模块；补上，行为不变。
@@ -18,7 +24,7 @@
 - 数据库：PostgreSQL 16 及以上；schema `integration_im_dingtalk`，属主角色与运行角色由部署方建好。
 - 消息系统（`BUS_URL`）与实现实例：本组件在流 `integration.im_dingtalk` 上发动作事件与投递结果。
 - 钉钉应用：`DINGTALK_APP_KEY`、`DINGTALK_APP_SECRET`（密钥）、互动卡片模板 `DINGTALK_CARD_TEMPLATE_ID`；事件订阅的 `DINGTALK_CALLBACK_TOKEN` 与 `DINGTALK_CALLBACK_AES_KEY`（密钥，43 个 base64 字符）。
-- **对外入口**：`POST /api/im-dingtalk/callback`（钉钉的回调）与 `GET /api/im-dingtalk/bindings/callback`（绑定的回跳，`DINGTALK_OAUTH_REDIRECT` 是它的公开地址）要经边缘暴露到钉钉与浏览器能到达的地址；`DINGTALK_LINK_BASE` 是前端地址（卡片里的链接相对它），`DINGTALK_BIND_RETURN` 是绑定后回到的前端页面。部署不能从外网到达时，按钮与绑定都不起作用，卡片照发。
+- **对外入口**：`POST /api/im-dingtalk/callback`（钉钉的回调，公开，签名证明它）与 `GET /api/im-dingtalk/bindings/callback`（绑定的回跳，要登录：浏览器经边缘带着会话，`DINGTALK_OAUTH_REDIRECT` 是它的公开地址）要经边缘暴露到钉钉与浏览器能到达的地址；回调的限速在边缘配；`DINGTALK_LINK_BASE` 是前端地址（卡片里的链接相对它），`DINGTALK_BIND_RETURN` 是绑定后回到的前端页面。部署不能从外网到达时，按钮与绑定都不起作用，卡片照发。
 - **通知组件**：在它的 `NOTIFICATION_CHANNELS` 里配 `dingtalk=integration/im-dingtalk`；本组件的投递只许 `infra/notification` 调用。
 - **任务所属组件**：要在钉钉里点按钮，所属组件（`erp/purchase`、`erp/payment`）的 `FLOW_ACTION_SOURCES` 列出本组件；没列时卡片只有链接按钮。
 - **不与不受信任的成员同壳**：同一外壳的成员共用总线连接，能在本组件的流上发布动作事件；放基础外壳（`be/go-infra`）或单跑。

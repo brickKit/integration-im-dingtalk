@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"time"
 
 	"github.com/brickKit/be-sdk-go/v3/runtime"
 )
@@ -16,6 +17,17 @@ type Config struct {
 	AppSecret, CallbackToken, AESKey    func() string // secrets: read at each use, never logged
 	LinkBase, OAuthRedirect, BindReturn string
 }
+
+// How long the purge keeps each kind of row (docs/design.md, the data): technical periods of this component, not a
+// legal retention (a customer's legal retention is the deployment's, P15).
+const (
+	SessionKept      = 24 * time.Hour      // a binding session after its expiry
+	DeliveryAfter    = 7 * 24 * time.Hour  // a delivery after its expiry ...
+	DeliveryAtLeast  = 90 * 24 * time.Hour // ... and at least this long after it was made
+	CallbackKept     = 180 * 24 * time.Hour
+	EndedBindingKept = 400 * 24 * time.Hour
+	PurgeJob         = "purge"
+)
 
 // Base is what every module works with: the runtime, the configuration and the DingTalk client.
 type Base struct {

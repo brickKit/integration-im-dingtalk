@@ -11,6 +11,7 @@ import (
 	client "github.com/brickKit/integration-im-dingtalk/v3/internal/dingtalk"
 
 	"github.com/brickKit/be-sdk-go/v3/channelpb"
+	"github.com/brickKit/be-sdk-go/v3/db"
 	"github.com/brickKit/be-sdk-go/v3/extcmd"
 	"github.com/brickKit/be-sdk-go/v3/grpcx"
 	"github.com/brickKit/be-sdk-go/v3/httpx"
@@ -48,20 +49,24 @@ func New(rt *runtime.Runtime) (*Module, error) {
 // UseClient replaces DingTalk's client (the integration tests: a fake DingTalk).
 func (m *Module) UseClient(c core.DingTalk) { m.b.Client = c }
 
+// Base is the module's runtime and configuration, for the integration tests to run a job directly.
+func (m *Module) Base() *core.Base { return m.b }
+
 // ExternalCommands is the adapter that sends the cards and its capabilities (be-protocol chapter 13; ID03, ID11).
 func (m *Module) ExternalCommands() (extcmd.Adapter, map[string]extcmd.Capabilities) {
 	return deliveries.Adapter{M: m.b}, deliveries.Capabilities()
 }
 
-// Routes registers the user surface (contract/openapi.yaml): the callback and the binding's return are public (their
-// own signature and state); the rest are the caller's own binding and the administrators'.
+// Routes registers the user surface (contract/openapi.yaml): DingTalk's callback is public (its own signature); the
+// binding's return is signed in (only who started it finishes it); the rest are the caller's own binding and the
+// administrators'.
 func (m *Module) Routes(r *httpx.Routes) error {
 	h := func(f func(*core.Base, *httpx.Context) error) httpx.Handler {
 		return func(c *httpx.Context) error { return f(m.b, c) }
 	}
 	r.Add(httpx.Route{Method: "POST", Path: "/api/im-dingtalk/callback", Public: true,
 		Handle: func(c *httpx.Context) error { return callbacks.Receive(m.b, m.counters, c) }})
-	r.Add(httpx.Route{Method: "GET", Path: "/api/im-dingtalk/bindings/callback", Public: true, Handle: h(bindings.Callback)})
+	r.Add(httpx.Route{Method: "GET", Path: "/api/im-dingtalk/bindings/callback", Operation: core.OpBindSelf, Handle: h(bindings.Callback)})
 	r.Add(httpx.Route{Method: "POST", Path: "/api/im-dingtalk/bindings/start", Operation: core.OpBindSelf, Handle: h(bindings.Start)})
 	r.Add(httpx.Route{Method: "GET", Path: "/api/im-dingtalk/bindings/me", Operation: core.OpBindSelf, Handle: h(bindings.Mine)})
 	r.Add(httpx.Route{Method: "DELETE", Path: "/api/im-dingtalk/bindings/me", Operation: core.OpBindSelf, Handle: h(bindings.UnbindMine)})
@@ -83,11 +88,26 @@ func (m *Module) Deliver(ctx context.Context, in *channelpb.DeliverRequest) (*ch
 	return deliveries.Deliver(m.b, ctx, in)
 }
 
-// Jobs declares the background work (protocol 01): each received callback's processing, and the alert on the stuck.
+// Jobs declares the background work (protocol 01): each received callback's processing, the alert on the stuck, and
+// the daily purge.
 func (m *Module) Jobs(j *work.Jobs) error {
 	j.Add(work.Job{Name: callbacks.JobProcess, Kind: work.Queue, Effect: work.Local, MaxAttempts: work.Unlimited,
 		Handle: func(ctx context.Context, r *work.Run) error { return callbacks.Process(m.b, ctx, r) }})
+	j.Add(work.Job{Name: core.PurgeJob, Kind: work.Singleton, Effect: work.Local, Interval: 24 * time.Hour,
+		MaxAttempts: work.Unlimited, Handle: func(ctx context.Context, _ *work.Run) error { return Purge(m.b, ctx) }})
 	j.Add(work.Job{Name: "callbacks-stuck", Kind: work.Singleton, Effect: work.Local, Interval: time.Minute,
 		MaxAttempts: work.Unlimited, Handle: func(ctx context.Context, r *work.Run) error { return callbacks.Stuck(m.b, ctx, r) }})
 	return nil
+}
+
+// Purge is the daily purge (the data): each module deletes its own rows past their period, in one transaction.
+func Purge(b *core.Base, ctx context.Context) error {
+	return b.RT.DB.BackgroundTx(ctx, func(ctx context.Context, tx db.Tx) error {
+		for _, purge := range []func(context.Context, db.Tx) error{bindings.Purge, deliveries.Purge, callbacks.Purge} {
+			if err := purge(ctx, tx); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

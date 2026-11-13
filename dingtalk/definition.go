@@ -17,7 +17,7 @@ import (
 
 // Identity.
 const (
-	Version  = "3.0.2"
+	Version  = "3.0.3"
 	GRPCPort = 9207
 )
 
@@ -48,8 +48,8 @@ func Keys() []config.Key {
 
 // Own describes the own keys for the manifest's configSchema.
 var Own = map[string]string{
-	core.KeyAPIURL:         "DingTalk's API (cards, OAuth): the simulator's address in a cell",
-	core.KeyOAPIURL:        "DingTalk's old API (the application's access token, a union id's user)",
+	core.KeyAPIURL:         "DingTalk's API (the application's token, cards, OAuth): the simulator's address in a cell",
+	core.KeyOAPIURL:        "DingTalk's old API (a union id's user)",
 	core.KeyLoginURL:       "DingTalk's OAuth consent page",
 	core.KeyAppKey:         "the DingTalk application's key (AppKey); also the callbacks' application id",
 	core.KeyAppSecret:      "the DingTalk application's secret",
